@@ -1,7 +1,7 @@
 {
   "name": "api-gateway",
   "version": "1.0.0",
-  "description": "",
+  "description": "Simple API-Gateway to handle the traffic from different services",
   "main": "index.js",
   "scripts": {
     "dev": "NODE_ENV=dev ts-node-dev --ignore-watch node_modules --respawn --transpile-only src/apps/api-gateway/index.ts"
