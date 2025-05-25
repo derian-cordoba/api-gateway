@@ -19,7 +19,6 @@ function bootstrap(): void {
 
   // Handle process termination signals
   process.on("SIGINT", async () => {
-    console.log("SIGINT signal received: closing HTTP server");
     await app.stop();
     process.exit(0);
   });
