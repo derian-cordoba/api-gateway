@@ -8,6 +8,7 @@ import HttpStatus from "http-status";
 import cors from "cors";
 import compress from "compression";
 import helmet from "helmet";
+import { ProxyManager } from "./ProxyManager";
 
 export class Router {
   private readonly router: ExpressRouter;
@@ -28,8 +29,8 @@ export class Router {
     // Configure security headers
     this.configureHelmet();
 
-    // Enable gzip compression
-    this.router.use(compress());
+    // Configure the proxy manager to register proxy routes
+    this.configureProxyManager();
   }
 
   /**
@@ -39,6 +40,14 @@ export class Router {
    */
   getRouter(): ExpressRouter {
     return this.router;
+  }
+
+  /**
+   * Configure the proxy manager to register all proxy routes
+   */
+  private configureProxyManager(): void {
+    const proxyManager = new ProxyManager(this.router);
+    proxyManager.registerProxyRoutes();
   }
 
   /**
@@ -61,11 +70,14 @@ export class Router {
   }
 
   /**
-   * Configure body parsers for the application
+   * Configure body parsers for the application and enable gzip compression
    */
   private configureBodyParser(): void {
     this.router.use(express.json());
     this.router.use(express.urlencoded({ extended: true }));
+
+    // Enable gzip compression
+    this.router.use(compress());
   }
 
   /**

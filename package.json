@@ -24,10 +24,10 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "http-proxy-middleware": "^3.0.5",
     "http-status": "^2.1.0"
   },
   "overrides": {
-    "glob": "^11.0.2",
     "rimraf": "^6.0.1"
   }
 }
