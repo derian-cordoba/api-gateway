@@ -8,85 +8,84 @@ import HttpStatus from "http-status";
 import cors from "cors";
 import compress from "compression";
 import helmet from "helmet";
+import pinoHttp from "pino-http";
 import { ProxyManager } from "./ProxyManager";
+import { createHealthRouter } from "./HealthRouter";
+import { appEnv } from "../config/app-env";
+import { logger } from "../logger";
 
 export class Router {
   private readonly router: ExpressRouter;
 
   constructor() {
-    // Create a new instance of the
     this.router = ExpressRouter();
-
-    // Handle errors in the application
-    this.configureErrorHandler();
-
-    // Enable CORS
-    this.configureCors();
-
-    // Configure the router to use JSON and URL encoded body parser
-    this.configureBodyParser();
-
-    // Configure security headers
-    this.configureHelmet();
-
-    // Configure the proxy manager to register proxy routes
-    this.configureProxyManager();
   }
 
   /**
    * Get the router instance for the application
-   *
-   * @returns {ExpressRouter} The router instance
    */
   getRouter(): ExpressRouter {
     return this.router;
   }
 
   /**
-   * Configure the proxy manager to register all proxy routes
+   * Initialise all middleware and routes. Must be awaited before the HTTP
+   * server starts listening so that proxy routes are registered in time.
    */
-  private configureProxyManager(): void {
-    const proxyManager = new ProxyManager(this.router);
-    proxyManager.registerProxyRoutes();
+  async init(): Promise<void> {
+    // Structured HTTP request logging
+    this.router.use(pinoHttp({ logger }));
+
+    // Security headers (full helmet defaults)
+    this.router.use(helmet());
+
+    // Configurable CORS
+    this.configureCors();
+
+    // Body parsing + gzip compression
+    this.configureBodyParser();
+
+    // Health check
+    this.router.use(createHealthRouter());
+
+    // Proxy routes (async — reads config file / env var)
+    await this.configureProxyManager();
+
+    // Error handler must be registered last
+    this.configureErrorHandler();
   }
 
-  /**
-   * Configure the error handler for the application
-   */
-  private configureErrorHandler(): void {
+  private configureCors(): void {
+    const { origins, methods, allowedHeaders } = appEnv.cors;
     this.router.use(
-      (error: Error, _: Request, res: Response, __: NextFunction): void => {
-        console.error(error);
-        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json(error);
-      }
+      cors({
+        origin: origins,
+        methods,
+        allowedHeaders,
+      })
     );
   }
 
-  /**
-   * Enable Cross-Origin Resource Sharing (CORS)
-   */
-  private configureCors(): void {
-    this.router.use(cors());
-  }
-
-  /**
-   * Configure body parsers for the application and enable gzip compression
-   */
   private configureBodyParser(): void {
     this.router.use(express.json());
     this.router.use(express.urlencoded({ extended: true }));
-
-    // Enable gzip compression
     this.router.use(compress());
   }
 
-  /**
-   * Configure security headers using Helmet
-   */
-  private configureHelmet(): void {
-    this.router.use(helmet.xssFilter());
-    this.router.use(helmet.noSniff());
-    this.router.use(helmet.hidePoweredBy());
-    this.router.use(helmet.frameguard({ action: "deny" }));
+  private async configureProxyManager(): Promise<void> {
+    const proxyManager = new ProxyManager(this.router);
+    await proxyManager.registerProxyRoutes();
+  }
+
+  private configureErrorHandler(): void {
+    this.router.use(
+      (error: Error, _req: Request, res: Response, _next: NextFunction): void => {
+        logger.error({ err: error }, "Unhandled error");
+        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+          error: "Internal Server Error",
+          message: error.message,
+        });
+      }
+    );
   }
 }

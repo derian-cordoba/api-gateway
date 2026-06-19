@@ -1,14 +1,9 @@
-import { config } from "dotenv";
 import { Server } from "./Server";
 
 export class App {
   private readonly server: Server;
 
   constructor() {
-    // Initialize the environment variables
-    config();
-
-    // Initialize the server
     this.server = new Server();
   }
 

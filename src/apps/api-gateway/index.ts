@@ -1,7 +1,11 @@
+import { config } from "dotenv";
+config();
+
 import { App } from "./App";
+import { logger } from "./logger";
 
 function handleError(error: Error): void {
-  console.log(error);
+  logger.error({ err: error }, "Fatal startup error");
   process.exit(1);
 }
 
@@ -24,8 +28,12 @@ function bootstrap(): void {
   });
 
   process.on("uncaughtException", async (error: Error) => {
-    console.log("uncaughtException", error);
-    await app.stop();
+    logger.error({ err: error }, "uncaughtException");
+    try {
+      await app.stop();
+    } catch {
+      // ignore stop errors during crash shutdown
+    }
     process.exit(1);
   });
 }
