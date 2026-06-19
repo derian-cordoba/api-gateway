@@ -7,7 +7,7 @@
  */
 
 const http = require("http");
-const HttpStatus = require("http-status").default;
+const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const products = [
   { id: 1, name: "Widget", description: "A standard widget", price: 9.99, stock: 100 },

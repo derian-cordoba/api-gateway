@@ -7,7 +7,7 @@
  */
 
 const http = require("http");
-const HttpStatus = require("http-status").default;
+const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const users = [
   { id: 1, name: "Alice Doe", email: "alice@example.com", role: "admin" },
