@@ -1,5 +1,5 @@
 {
-  "name": "api-gateway",
+  "name": "@derian-cordoba/api-gateway",
   "version": "1.0.0",
   "description": "A generic, configuration-driven HTTP API gateway with per-route rate limiting, structured logging, and security headers",
   "main": "./dist/src/apps/api-gateway/index.js",
