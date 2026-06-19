@@ -1,5 +1,5 @@
 import { Router as ExpressRouter, type Request, type Response } from "express";
-import HttpStatus from "http-status";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 
 const startTime = Date.now();
 

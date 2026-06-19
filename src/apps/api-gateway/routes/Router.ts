@@ -4,7 +4,7 @@ import express, {
   type Request,
   type Response,
 } from "express";
-import HttpStatus from "http-status";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import cors from "cors";
 import compress from "compression";
 import helmet from "helmet";

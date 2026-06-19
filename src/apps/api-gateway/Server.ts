@@ -20,13 +20,27 @@ export class Server {
   }
 
   /**
-   * Initialise routes then start the HTTP server.
-   * Awaiting router.init() ensures all proxy routes are registered
-   * before the server begins accepting connections.
+   * Register all middleware and proxy routes without opening a port.
+   * Call this before start() or use it directly in tests with getApp().
    */
-  async start(): Promise<void> {
+  async init(): Promise<void> {
     await this.router.init();
     this.app.use(this.prefix, this.router.getRouter());
+  }
+
+  /**
+   * Returns the underlying Express application.
+   * Useful for integration tests via supertest without binding to a port.
+   */
+  getApp(): Express {
+    return this.app;
+  }
+
+  /**
+   * Initialise routes then start the HTTP server.
+   */
+  async start(): Promise<void> {
+    await this.init();
 
     return new Promise((resolve: (value: void | PromiseLike<void>) => void) => {
       this.httpServer.listen(this.port, () => {

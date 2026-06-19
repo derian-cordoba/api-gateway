@@ -1,7 +1,7 @@
 import type { Router } from "express";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import rateLimit from "express-rate-limit";
-import HttpStatus from "http-status";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import { readFile } from "node:fs/promises";
 import type { Gateway } from "../types/gateway";
 import { validateRoutes } from "./RouteValidator";
