@@ -1,0 +1,30 @@
+[
+  {
+    "baseURL": "/users",
+    "proxy": {
+      "target": "http://localhost:4001",
+      "changeOrigin": true,
+      "pathRewrite": { "^/users": "" }
+    },
+    "rateLimit": {
+      "max": 10,
+      "windowMs": 60000,
+      "statusCode": 429,
+      "message": "Too many requests to the users service. Try again in a minute."
+    }
+  },
+  {
+    "baseURL": "/products",
+    "proxy": {
+      "target": "http://localhost:4002",
+      "changeOrigin": true,
+      "pathRewrite": { "^/products": "" }
+    },
+    "rateLimit": {
+      "max": 20,
+      "windowMs": 60000,
+      "statusCode": 429,
+      "message": "Too many requests to the products service. Try again in a minute."
+    }
+  }
+]
