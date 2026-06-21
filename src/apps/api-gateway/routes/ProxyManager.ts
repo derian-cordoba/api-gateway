@@ -5,6 +5,7 @@ import { StatusCodes as HttpStatus } from "http-status-codes";
 import { readFile } from "node:fs/promises";
 import type { Gateway } from "../types/gateway";
 import { validateRoutes } from "./RouteValidator";
+import { createAuthMiddleware } from "../middleware/authMiddleware";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 
@@ -29,6 +30,11 @@ export class ProxyManager {
     }
 
     routes.forEach((route: Gateway) => {
+      // Apply per-route authentication when configured
+      if (route.auth) {
+        this.router.use(route.baseURL, createAuthMiddleware(route.auth));
+      }
+
       // Apply per-route rate limiting when configured
       if (route.rateLimit) {
         this.router.use(

@@ -122,4 +122,63 @@ describe("validateRoutes", () => {
       ).toThrow("Invalid route configuration:");
     });
   });
+
+  describe("auth field", () => {
+    it("accepts JWT auth with only secret", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, auth: { enabled: true, strategy: "jwt", secret: "my-secret" } },
+      ]);
+      expect(route.auth).toMatchObject({ enabled: true, strategy: "jwt", secret: "my-secret" });
+    });
+
+    it("accepts JWT auth with only publicKey", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, auth: { enabled: true, strategy: "jwt", publicKey: "-----BEGIN PUBLIC KEY-----" } },
+      ]);
+      expect(route.auth).toMatchObject({ strategy: "jwt", publicKey: "-----BEGIN PUBLIC KEY-----" });
+    });
+
+    it("accepts JWT auth with both secret and publicKey", () => {
+      const [route] = validateRoutes([
+        {
+          ...validRoute,
+          auth: { enabled: true, strategy: "jwt", secret: "s", publicKey: "pk", algorithms: ["RS256"] },
+        },
+      ]);
+      expect(route.auth).toMatchObject({ algorithms: ["RS256"] });
+    });
+
+    it("accepts JWT auth with enabled: false (passthrough)", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, auth: { enabled: false, strategy: "jwt" } },
+      ]);
+      expect(route.auth).toMatchObject({ enabled: false, strategy: "jwt" });
+    });
+
+    it("accepts apiKey auth with required keys", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, auth: { enabled: true, strategy: "apiKey", keys: ["k1", "k2"] } },
+      ]);
+      expect(route.auth).toMatchObject({ strategy: "apiKey", keys: ["k1", "k2"] });
+    });
+
+    it("accepts apiKey auth with a custom header", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, auth: { enabled: true, strategy: "apiKey", header: "x-gateway-key", keys: ["k1"] } },
+      ]);
+      expect(route.auth).toMatchObject({ header: "x-gateway-key" });
+    });
+
+    it("throws when apiKey auth has an empty keys array", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, auth: { enabled: true, strategy: "apiKey", keys: [] } }])
+      ).toThrow("apiKey auth requires at least one key");
+    });
+
+    it("throws when strategy is an unrecognized value", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, auth: { enabled: true, strategy: "oauth" } }])
+      ).toThrow();
+    });
+  });
 });
