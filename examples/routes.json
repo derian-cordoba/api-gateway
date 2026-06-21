@@ -1,0 +1,64 @@
+[
+  {
+    "baseURL": "/users",
+    "proxy": {
+      "target": "http://localhost:4001",
+      "changeOrigin": true,
+      "pathRewrite": { "^/users": "" }
+    },
+    "rateLimit": {
+      "max": 10,
+      "windowMs": 60000,
+      "statusCode": 429,
+      "message": "Too many requests to the users service. Try again in a minute."
+    }
+  },
+  {
+    "baseURL": "/products",
+    "proxy": {
+      "target": "http://localhost:4002",
+      "changeOrigin": true,
+      "pathRewrite": { "^/products": "" }
+    },
+    "rateLimit": {
+      "max": 20,
+      "windowMs": 60000,
+      "statusCode": 429,
+      "message": "Too many requests to the products service. Try again in a minute."
+    }
+  },
+  {
+    "baseURL": "/auth",
+    "proxy": {
+      "target": "http://localhost:4003",
+      "changeOrigin": true,
+      "pathRewrite": { "^/auth": "" }
+    }
+  },
+  {
+    "baseURL": "/orders",
+    "proxy": {
+      "target": "http://localhost:4004",
+      "changeOrigin": true,
+      "pathRewrite": { "^/orders": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "jwt"
+    }
+  },
+  {
+    "baseURL": "/reports",
+    "proxy": {
+      "target": "http://localhost:4005",
+      "changeOrigin": true,
+      "pathRewrite": { "^/reports": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "apiKey",
+      "header": "x-api-key",
+      "keys": ["key-service-alpha-123", "key-service-beta-456"]
+    }
+  }
+]

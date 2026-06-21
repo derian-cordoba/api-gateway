@@ -1,0 +1,22 @@
+[
+  {
+    "baseURL": "/auth",
+    "proxy": {
+      "target": "http://localhost:4003",
+      "changeOrigin": true,
+      "pathRewrite": { "^/auth": "" }
+    }
+  },
+  {
+    "baseURL": "/orders",
+    "proxy": {
+      "target": "http://localhost:4004",
+      "changeOrigin": true,
+      "pathRewrite": { "^/orders": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "jwt"
+    }
+  }
+]

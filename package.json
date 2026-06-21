@@ -37,7 +37,7 @@
     "prepare": "pnpm build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "example": "bash examples/basic/run.sh"
+    "example": "bash examples/run.sh"
   },
   "devDependencies": {
     "@types/compression": "^1.8.0",
