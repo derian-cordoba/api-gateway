@@ -12,6 +12,9 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Route Configuration](#route-configuration)
+- [Authentication](#authentication)
+  - [JWT](#jwt)
+  - [API Key](#api-key)
 - [Running the Gateway](#running-the-gateway)
 - [Health Check](#health-check)
 - [Project Structure](#project-structure)
@@ -23,6 +26,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 ## Features
 
 - **Configuration-driven routing** — define proxy routes in a JSON file, an environment variable, or both; changes take effect on restart with zero code changes
+- **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC) or an API key; set `enabled: false` to bypass with zero overhead
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
@@ -98,6 +102,13 @@ Copy `.env.example` to `.env` and edit as needed.
 | `ROUTES_FILE_PATH` | `routes.json` | Path to the JSON route config file, relative to `process.cwd()`. |
 | `ROUTES` | _(none)_ | Inline route definitions as a JSON array. Merged with `ROUTES_FILE_PATH`. Useful for containerised deployments where injecting a file is inconvenient. |
 
+#### Authentication
+
+| Variable | Default | Description |
+|---|---|---|
+| `JWT_SECRET` | _(none)_ | Fallback HMAC signing secret used when a JWT route has no inline `secret` field. |
+| `JWT_PUBLIC_KEY` | _(none)_ | Fallback PEM public key used when a JWT route has no inline `publicKey` field. Takes precedence over `JWT_SECRET`. |
+
 ---
 
 ### Route Configuration
@@ -135,6 +146,35 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
 
 Responses include standard `RateLimit-*` headers (RFC draft-8).
 
+#### `Auth`
+
+Adds authentication middleware to a route. When `enabled` is `false` the middleware is a no-op passthrough — no overhead, no token check.
+
+Two strategies are supported, selected with the `strategy` field.
+
+**`"jwt"` — Bearer token validation**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | ✅ | `true` to enforce, `false` to bypass. |
+| `strategy` | `"jwt"` | ✅ | — |
+| `secret` | `string` | — | Shared secret for HMAC algorithms (HS256, HS384, HS512). Falls back to `JWT_SECRET` env var. |
+| `publicKey` | `string` | — | PEM-encoded public key or X.509 certificate for asymmetric algorithms (RS256, RS384, RS512, ES256 …). Falls back to `JWT_PUBLIC_KEY` env var. Takes precedence over `secret` when both are present. |
+| `algorithms` | `string[]` | — | Explicit algorithm allowlist. Defaults to `["RS256"]` when `publicKey` is used, `["HS256"]` otherwise. Recommended to prevent algorithm-confusion attacks. |
+
+The gateway expects the token in the `Authorization: Bearer <token>` header and returns `401` on a missing, malformed, or invalid token.
+
+**`"apiKey"` — Header-based API key**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | ✅ | `true` to enforce, `false` to bypass. |
+| `strategy` | `"apiKey"` | ✅ | — |
+| `keys` | `string[]` | ✅ | List of valid API keys. At least one entry required. |
+| `header` | `string` | — | Header name to read the key from (default: `x-api-key`). |
+
+Returns `401` when the header is absent or the value is not in `keys`.
+
 #### Example `routes.json`
 
 ```json
@@ -158,11 +198,24 @@ Responses include standard `RateLimit-*` headers (RFC draft-8).
     "proxy": {
       "target": "http://orders-service:3002",
       "changeOrigin": true,
-      "pathRewrite": { "^/orders": "" },
-      "headers": {
-        "X-Internal-Source": "api-gateway"
-      },
-      "timeout": 5000
+      "pathRewrite": { "^/orders": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "jwt"
+    }
+  },
+  {
+    "baseURL": "/reports",
+    "proxy": {
+      "target": "http://reports-service:3003",
+      "changeOrigin": true,
+      "pathRewrite": { "^/reports": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "apiKey",
+      "keys": ["key-service-alpha-123", "key-service-beta-456"]
     }
   }
 ]
@@ -174,6 +227,93 @@ Routes are loaded from two sources and **merged**:
 
 1. `ROUTES_FILE_PATH` — JSON file on disk (missing file is a warning, not an error)
 2. `ROUTES` — JSON array in an environment variable
+
+---
+
+## Authentication
+
+Authentication is optional and configured per route via the `auth` field. The middleware is applied before rate limiting and proxying. When `enabled: false` the handler is a single no-op function — zero overhead on unprotected routes.
+
+### JWT
+
+Protect a route with a Bearer token. The gateway validates the token signature; your upstream receives the request only if verification passes.
+
+```json
+{
+  "baseURL": "/orders",
+  "proxy": { "target": "http://orders-service:3002", "changeOrigin": true },
+  "auth": {
+    "enabled": true,
+    "strategy": "jwt"
+  }
+}
+```
+
+The signing key is resolved in this order:
+
+1. `publicKey` field in the route config (PEM — use for RS256 / ES256)
+2. `JWT_PUBLIC_KEY` environment variable
+3. `secret` field in the route config (string — use for HS256)
+4. `JWT_SECRET` environment variable
+
+`publicKey` always takes precedence over `secret`. If neither is present the gateway returns `401`.
+
+**HMAC (HS256) — shared secret:**
+
+```bash
+# .env
+JWT_SECRET=super-secret-key-change-in-production
+```
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password123"}' | jq -r '.token')
+
+curl http://localhost:3000/orders \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**RSA (RS256) — public/private key pair:**
+
+```json
+{
+  "auth": {
+    "enabled": true,
+    "strategy": "jwt",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjAN...\n-----END PUBLIC KEY-----",
+    "algorithms": ["RS256"]
+  }
+}
+```
+
+### API Key
+
+Protect a route with a pre-shared key delivered in a request header.
+
+```json
+{
+  "baseURL": "/reports",
+  "proxy": { "target": "http://reports-service:3003", "changeOrigin": true },
+  "auth": {
+    "enabled": true,
+    "strategy": "apiKey",
+    "header": "x-api-key",
+    "keys": ["key-service-alpha-123", "key-service-beta-456"]
+  }
+}
+```
+
+```bash
+# Valid key → 200
+curl http://localhost:3000/reports \
+  -H "x-api-key: key-service-alpha-123"
+
+# Missing or wrong key → 401
+curl http://localhost:3000/reports
+```
+
+Multiple keys in `keys` let you rotate credentials without downtime — add the new key, deploy, then remove the old one.
 
 ---
 
@@ -245,87 +385,97 @@ src/apps/api-gateway/
 │   ├── env/config.ts         # NODE_ENV → isDev flag
 │   ├── gateway/config.ts     # GATEWAY_PORT, GATEWAY_PREFIX
 │   ├── cors/config.ts        # CORS_ORIGINS, CORS_METHODS, CORS_HEADERS
-│   └── routes/config.ts      # ROUTES_FILE_PATH
+│   ├── routes/config.ts      # ROUTES_FILE_PATH
+│   └── auth/config.ts        # JWT_SECRET, JWT_PUBLIC_KEY
+│
+├── middleware/
+│   ├── authMiddleware.ts     # Factory — returns the right strategy or a no-op
+│   └── auth/
+│       ├── AuthStrategy.ts   # Interface (Strategy pattern)
+│       ├── JwtAuthStrategy.ts    # JWT Bearer token validation (HMAC + RSA/EC)
+│       └── ApiKeyAuthStrategy.ts # Header-based API key validation
 │
 ├── routes/
 │   ├── Router.ts             # Middleware pipeline (logging → security → CORS → body → proxy → errors)
 │   ├── ProxyManager.ts       # Reads, validates, and registers proxy routes
-│   ├── RouteValidator.ts     # Zod schemas for Gateway / Proxy / RateLimit types
+│   ├── RouteValidator.ts     # Zod schemas for Gateway / Proxy / RateLimit / Auth types
 │   └── HealthRouter.ts       # GET /health handler
 │
 └── types/
     ├── gateway.d.ts          # Gateway type
     ├── proxy.d.ts            # Proxy type
-    └── rate-limit.d.ts       # RateLimit type
+    ├── rate-limit.d.ts       # RateLimit type
+    └── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
 ```
 
 ---
 
 ## Example Project
 
-`examples/basic/` contains a self-contained demo with two mock upstream services and a pre-built gateway config.
-
-### What's included
-
-| File | Description |
-|---|---|
-| `routes.json` | Gateway config with two routes (`/users`, `/products`) each with rate limiting and path rewriting |
-| `.env` | Gateway environment for the example |
-| `upstream-users.js` | Mock Users service on port `4001` |
-| `upstream-products.js` | Mock Products service on port `4002` |
-| `run.sh` | Starts all three processes and stops them together on Ctrl+C |
-
-### Running the example
+`examples/` contains a self-contained demo that starts five upstream services and one gateway covering all features: rate limiting, JWT auth, and API key auth.
 
 ```bash
 pnpm example
 ```
 
-This copies `examples/basic/.env` to the project root and starts all three services. Once running:
+This copies `examples/.env` to the project root and starts everything. Once running:
 
-| Endpoint | Description |
-|---|---|
-| `http://localhost:3000/health` | Gateway health check |
-| `http://localhost:3000/users` | Proxied to Users service |
-| `http://localhost:3000/products` | Proxied to Products service |
-
-### Users service endpoints (`/users`)
-
-| Method | Path | Description |
+| Endpoint | Auth | Description |
 |---|---|---|
-| `GET` | `/users` | List all users |
-| `GET` | `/users/:id` | Get a user by ID |
-| `POST` | `/users` | Create a user (body: `{ name, email }`) |
-| `DELETE` | `/users/:id` | Delete a user by ID |
+| `http://localhost:3000/health` | — | Gateway health check |
+| `http://localhost:3000/users` | — | Users service (rate limited) |
+| `http://localhost:3000/products` | — | Products service (rate limited) |
+| `http://localhost:3000/auth/login` | — | Issues JWT tokens |
+| `http://localhost:3000/orders` | JWT Bearer | Orders service |
+| `http://localhost:3000/reports` | API key | Reports service |
 
-### Products service endpoints (`/products`)
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/products` | List all products |
-| `GET` | `/products/:id` | Get a product by ID |
-| `POST` | `/products` | Create a product (body: `{ name, price }`) |
-| `PATCH` | `/products/:id/stock` | Adjust stock (body: `{ quantity: number }`) |
-
-### Example requests
+### Public routes
 
 ```bash
-# List users
 curl http://localhost:3000/users
-
-# Create a user
-curl -X POST http://localhost:3000/users \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Alice", "email": "alice@example.com"}'
-
-# Get a product
 curl http://localhost:3000/products/1
-
-# Update product stock
-curl -X PATCH http://localhost:3000/products/1/stock \
-  -H "Content-Type: application/json" \
-  -d '{"quantity": 25}'
 ```
+
+### JWT-protected route (`/orders`)
+
+```bash
+# 1. Log in to get a token (users: alice/password123, bob/password456)
+TOKEN=$(curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password123"}' | jq -r '.token')
+
+# 2. Access the protected route
+curl http://localhost:3000/orders \
+  -H "Authorization: Bearer $TOKEN"
+
+# 3. Create an order
+curl -X POST http://localhost:3000/orders \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"userId":1,"items":[{"productId":2,"qty":1}],"total":24.99}'
+```
+
+### API-key-protected route (`/reports`)
+
+```bash
+# Valid keys: key-service-alpha-123  ·  key-service-beta-456
+
+curl http://localhost:3000/reports \
+  -H "x-api-key: key-service-alpha-123"
+
+curl http://localhost:3000/reports/sales \
+  -H "x-api-key: key-service-beta-456"
+```
+
+### Individual example directories
+
+Each sub-directory is also usable as a standalone reference:
+
+| Directory | Description |
+|---|---|
+| `examples/basic/` | Rate limiting only — Users + Products services |
+| `examples/jwt-auth/` | JWT auth — Auth service + Orders service |
+| `examples/api-key-auth/` | API key auth — Reports service |
 
 ---
 
@@ -339,18 +489,19 @@ Client
   ▼
 Express app
   │
-  ├─ pino-http          structured request/response logging
-  ├─ helmet             security headers (CSP, HSTS, X-Frame-Options, …)
-  ├─ cors               configurable origin / method / header policy
-  ├─ express.json       body parsing
-  ├─ compression        gzip response compression
+  ├─ pino-http              structured request/response logging
+  ├─ helmet                 security headers (CSP, HSTS, X-Frame-Options, …)
+  ├─ cors                   configurable origin / method / header policy
+  ├─ express.json           body parsing
+  ├─ compression            gzip response compression
   │
-  ├─ GET /health        health check — short-circuits here
+  ├─ GET /health            health check — short-circuits here
   │
-  ├─ express-rate-limit per-route request throttling (applied per baseURL)
+  ├─ authMiddleware         per-route — JWT or API key check → 401 on failure
+  ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ http-proxy-middleware  proxies request to upstream, forwards body
   │
-  └─ error handler      catches unhandled errors → 500 JSON response
+  └─ error handler          catches unhandled errors → 500 JSON response
 ```
 
 ### Startup sequence
