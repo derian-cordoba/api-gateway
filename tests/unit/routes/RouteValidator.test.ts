@@ -181,4 +181,69 @@ describe("validateRoutes", () => {
       ).toThrow();
     });
   });
+
+  describe("circuitBreaker field", () => {
+    it("accepts a minimal circuitBreaker config (threshold + timeout)", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, circuitBreaker: { threshold: 5, timeout: 30_000 } },
+      ]);
+      expect(route.circuitBreaker).toEqual({ threshold: 5, timeout: 30_000 });
+    });
+
+    it("accepts circuitBreaker with all fields including successThreshold", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, circuitBreaker: { threshold: 3, timeout: 10_000, successThreshold: 2 } },
+      ]);
+      expect(route.circuitBreaker).toEqual({ threshold: 3, timeout: 10_000, successThreshold: 2 });
+    });
+
+    it("omitting circuitBreaker leaves it undefined", () => {
+      const [route] = validateRoutes([validRoute]);
+      expect(route.circuitBreaker).toBeUndefined();
+    });
+
+    it("throws when threshold is zero", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { threshold: 0, timeout: 10_000 } }])
+      ).toThrow("Circuit breaker threshold must be a positive integer");
+    });
+
+    it("throws when threshold is negative", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { threshold: -1, timeout: 10_000 } }])
+      ).toThrow("Circuit breaker threshold must be a positive integer");
+    });
+
+    it("throws when timeout is zero", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { threshold: 3, timeout: 0 } }])
+      ).toThrow("Circuit breaker timeout must be a positive number");
+    });
+
+    it("throws when timeout is negative", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { threshold: 3, timeout: -5000 } }])
+      ).toThrow("Circuit breaker timeout must be a positive number");
+    });
+
+    it("throws when successThreshold is zero", () => {
+      expect(() =>
+        validateRoutes([
+          { ...validRoute, circuitBreaker: { threshold: 3, timeout: 10_000, successThreshold: 0 } },
+        ])
+      ).toThrow("Circuit breaker successThreshold must be a positive integer");
+    });
+
+    it("throws when threshold is missing", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { timeout: 10_000 } }])
+      ).toThrow();
+    });
+
+    it("throws when timeout is missing", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, circuitBreaker: { threshold: 3 } }])
+      ).toThrow();
+    });
+  });
 });

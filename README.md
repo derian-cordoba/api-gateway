@@ -1,6 +1,6 @@
 # API Gateway
 
-A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route rate limiting, request validation, structured logging, and full security headers out of the box.
+A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route rate limiting, authentication, circuit breaking, structured logging, and full security headers out of the box.
 
 ---
 
@@ -15,10 +15,11 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - [Authentication](#authentication)
   - [JWT](#jwt)
   - [API Key](#api-key)
+- [Circuit Breaker](#circuit-breaker)
 - [Running the Gateway](#running-the-gateway)
 - [Health Check](#health-check)
 - [Project Structure](#project-structure)
-- [Example Project](#example-project)
+- [Example Projects](#example-projects)
 - [Architecture](#architecture)
 
 ---
@@ -28,6 +29,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Configuration-driven routing** — define proxy routes in a JSON file, an environment variable, or both; changes take effect on restart with zero code changes
 - **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC) or an API key; set `enabled: false` to bypass with zero overhead
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
+- **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
 - **Security headers** — full `helmet` defaults applied to every response (`CSP`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`, etc.)
@@ -117,9 +119,11 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
 
 ```ts
 {
-  baseURL:    string     // required — path prefix to match, must start with "/"
-  proxy:      Proxy      // required — upstream proxy settings
-  rateLimit?: RateLimit  // optional — per-route rate limiting
+  baseURL:         string          // required — path prefix to match, must start with "/"
+  proxy:           Proxy          // required — upstream proxy settings
+  rateLimit?:      RateLimit      // optional — per-route rate limiting
+  auth?:           Auth           // optional — per-route authentication
+  circuitBreaker?: CircuitBreaker // optional — per-route circuit breaker
 }
 ```
 
@@ -162,8 +166,6 @@ Two strategies are supported, selected with the `strategy` field.
 | `publicKey` | `string` | — | PEM-encoded public key or X.509 certificate for asymmetric algorithms (RS256, RS384, RS512, ES256 …). Falls back to `JWT_PUBLIC_KEY` env var. Takes precedence over `secret` when both are present. |
 | `algorithms` | `string[]` | — | Explicit algorithm allowlist. Defaults to `["RS256"]` when `publicKey` is used, `["HS256"]` otherwise. Recommended to prevent algorithm-confusion attacks. |
 
-The gateway expects the token in the `Authorization: Bearer <token>` header and returns `401` on a missing, malformed, or invalid token.
-
 **`"apiKey"` — Header-based API key**
 
 | Field | Type | Required | Description |
@@ -173,7 +175,15 @@ The gateway expects the token in the `Authorization: Bearer <token>` header and 
 | `keys` | `string[]` | ✅ | List of valid API keys. At least one entry required. |
 | `header` | `string` | — | Header name to read the key from (default: `x-api-key`). |
 
-Returns `401` when the header is absent or the value is not in `keys`.
+#### `CircuitBreaker`
+
+Stops forwarding requests to a failing upstream after a configurable number of consecutive failures and returns `503 Service Unavailable` until the upstream recovers. See [Circuit Breaker](#circuit-breaker) for a full explanation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `threshold` | `number` | ✅ | Consecutive failures before the circuit opens. Must be a positive integer. |
+| `timeout` | `number` | ✅ | Milliseconds the circuit stays open before transitioning to half-open and sending a probe request. |
+| `successThreshold` | `number` | — | Consecutive probe successes required to close the circuit (default: `1`). |
 
 #### Example `routes.json`
 
@@ -217,13 +227,26 @@ Returns `401` when the header is absent or the value is not in `keys`.
       "strategy": "apiKey",
       "keys": ["key-service-alpha-123", "key-service-beta-456"]
     }
+  },
+  {
+    "baseURL": "/payments",
+    "proxy": {
+      "target": "http://payments-service:3004",
+      "changeOrigin": true,
+      "pathRewrite": { "^/payments": "" }
+    },
+    "circuitBreaker": {
+      "threshold": 5,
+      "timeout": 30000,
+      "successThreshold": 1
+    }
   }
 ]
 ```
 
 Config is validated with [Zod](https://zod.dev) at startup. If any route is invalid the process exits immediately with a detailed per-field error message.
 
-Routes are loaded from two sources and **merged**:
+Routes are loaded from two sources at startup and **merged**:
 
 1. `ROUTES_FILE_PATH` — JSON file on disk (missing file is a warning, not an error)
 2. `ROUTES` — JSON array in an environment variable
@@ -317,6 +340,99 @@ Multiple keys in `keys` let you rotate credentials without downtime — add the 
 
 ---
 
+## Circuit Breaker
+
+The circuit breaker protects your gateway from cascading failures. When an upstream service becomes unhealthy, the gateway detects the pattern, opens the circuit, and rejects subsequent requests immediately — without adding load to an already-struggling upstream.
+
+### State machine
+
+```
+              threshold failures
+  CLOSED ────────────────────────► OPEN
+    ▲                                │
+    │ successThreshold successes     │ timeout elapses
+    │                                ▼
+  HALF-OPEN ◄─────────────────── (probe)
+              1 probe request let through
+```
+
+| State | Behaviour |
+|---|---|
+| **CLOSED** | Normal operation. Failures are counted; successful responses reset the counter. |
+| **OPEN** | All requests are rejected immediately with `503 Service Unavailable` and a `Retry-After` header. The upstream is not contacted. |
+| **HALF-OPEN** | After `timeout` ms the circuit allows one probe request through. A successful response closes the circuit; any failure re-opens it with a fresh timeout. |
+
+Both **5xx HTTP responses** and **network-level errors** (e.g. `ECONNREFUSED`, `ETIMEDOUT`) count as failures.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/payments",
+  "proxy": {
+    "target": "http://payments-service:3004",
+    "changeOrigin": true,
+    "pathRewrite": { "^/payments": "" }
+  },
+  "circuitBreaker": {
+    "threshold": 5,
+    "timeout": 30000,
+    "successThreshold": 1
+  }
+}
+```
+
+### Responses
+
+**Circuit OPEN — `503 Service Unavailable`:**
+
+```
+HTTP/1.1 503 Service Unavailable
+Retry-After: 28
+Content-Type: application/json
+
+{
+  "error": "Service Unavailable",
+  "message": "Circuit breaker open — upstream is not responding"
+}
+```
+
+The `Retry-After` header tells clients how many seconds remain before the circuit transitions to half-open.
+
+**Upstream network error — `502 Bad Gateway`:**
+
+```json
+{
+  "error": "Bad Gateway",
+  "message": "Upstream service is unavailable"
+}
+```
+
+### Gateway log output
+
+State transitions are logged at the `warn` / `info` level so you can observe the circuit breaker lifecycle without instrumenting your upstreams:
+
+```
+WARN  Circuit breaker opened, upstream failing   { baseURL: "/payments", retryAfterSeconds: 30 }
+WARN  Circuit breaker half-open, probing upstream { baseURL: "/payments" }
+INFO  Circuit breaker closed, upstream recovered  { baseURL: "/payments" }
+```
+
+### Combining with rate limiting
+
+Circuit breaking and rate limiting are independent and can be applied to the same route. Rate limiting runs first:
+
+```json
+{
+  "baseURL": "/payments",
+  "proxy": { "target": "http://payments-service:3004", "changeOrigin": true },
+  "rateLimit": { "max": 200, "windowMs": 60000 },
+  "circuitBreaker": { "threshold": 5, "timeout": 30000 }
+}
+```
+
+---
+
 ## Running the Gateway
 
 ### Development (hot-reload)
@@ -390,44 +506,57 @@ src/apps/api-gateway/
 │
 ├── middleware/
 │   ├── authMiddleware.ts     # Factory — returns the right strategy or a no-op
-│   └── auth/
-│       ├── AuthStrategy.ts   # Interface (Strategy pattern)
-│       ├── JwtAuthStrategy.ts    # JWT Bearer token validation (HMAC + RSA/EC)
-│       └── ApiKeyAuthStrategy.ts # Header-based API key validation
+│   ├── auth/
+│   │   ├── AuthStrategy.ts       # Interface (Strategy pattern)
+│   │   ├── JwtAuthStrategy.ts    # JWT Bearer token validation (HMAC + RSA/EC)
+│   │   └── ApiKeyAuthStrategy.ts # Header-based API key validation
+│   └── circuit-breaker/
+│       ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
+│       └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
 │
 ├── routes/
 │   ├── Router.ts             # Middleware pipeline (logging → security → CORS → body → proxy → errors)
 │   ├── ProxyManager.ts       # Reads, validates, and registers proxy routes
-│   ├── RouteValidator.ts     # Zod schemas for Gateway / Proxy / RateLimit / Auth types
-│   └── HealthRouter.ts       # GET /health handler
+│   ├── RouteValidator.ts     # Validates route config and delegates to schema modules
+│   ├── HealthRouter.ts       # GET /health handler
+│   └── validators/           # One Zod schema per domain
+│       ├── proxy.schema.ts
+│       ├── rate-limit.schema.ts
+│       ├── auth.schema.ts
+│       ├── circuit-breaker.schema.ts
+│       └── gateway.schema.ts
 │
 └── types/
     ├── gateway.d.ts          # Gateway type
     ├── proxy.d.ts            # Proxy type
     ├── rate-limit.d.ts       # RateLimit type
-    └── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
+    ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
+    └── circuit-breaker.d.ts  # CircuitBreakerConfig type
 ```
 
 ---
 
-## Example Project
+## Example Projects
 
-`examples/` contains a self-contained demo that starts five upstream services and one gateway covering all features: rate limiting, JWT auth, and API key auth.
+`examples/` contains self-contained demos that start upstream services and a gateway covering all features.
+
+### Run all examples together
 
 ```bash
 pnpm example
 ```
 
-This copies `examples/.env` to the project root and starts everything. Once running:
+Copies `examples/.env` to the project root and starts all services. Once running:
 
-| Endpoint | Auth | Description |
+| Endpoint | Feature | Description |
 |---|---|---|
 | `http://localhost:3000/health` | — | Gateway health check |
-| `http://localhost:3000/users` | — | Users service (rate limited) |
-| `http://localhost:3000/products` | — | Products service (rate limited) |
+| `http://localhost:3000/users` | Rate limiting | Users service |
+| `http://localhost:3000/products` | Rate limiting | Products service |
 | `http://localhost:3000/auth/login` | — | Issues JWT tokens |
-| `http://localhost:3000/orders` | JWT Bearer | Orders service |
-| `http://localhost:3000/reports` | API key | Reports service |
+| `http://localhost:3000/orders` | JWT auth | Orders service |
+| `http://localhost:3000/reports` | API key auth | Reports service |
+| `http://localhost:3000/payments` | Circuit breaker | Payments service |
 
 ### Public routes
 
@@ -459,23 +588,51 @@ curl -X POST http://localhost:3000/orders \
 
 ```bash
 # Valid keys: key-service-alpha-123  ·  key-service-beta-456
-
 curl http://localhost:3000/reports \
   -H "x-api-key: key-service-alpha-123"
+```
 
-curl http://localhost:3000/reports/sales \
-  -H "x-api-key: key-service-beta-456"
+### Circuit breaker route (`/payments`)
+
+The payments upstream exposes an admin API on port `4066` (not proxied by the gateway) so you can toggle its health at runtime without restarting anything.
+
+```bash
+# 1. Normal request — circuit is CLOSED, upstream responds normally
+curl -s http://localhost:3000/payments | jq
+
+# 2. Degrade the upstream
+curl -s -X POST http://localhost:4066/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"failing"}' | jq
+
+# 3. Trigger the threshold (3 failures open the circuit)
+curl -s http://localhost:3000/payments | jq   # failure 1
+curl -s http://localhost:3000/payments | jq   # failure 2
+curl -s http://localhost:3000/payments | jq   # failure 3 → circuit OPEN
+
+# 4. Circuit is now OPEN — gateway short-circuits with 503 + Retry-After
+#    (the upstream receives no requests — watch its stdout to confirm)
+curl -si http://localhost:3000/payments | head -20
+
+# 5. Restore the upstream
+curl -s -X POST http://localhost:4066/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"healthy"}' | jq
+
+# 6. Wait for the timeout, then the probe closes the circuit
+sleep 11 && curl -s http://localhost:3000/payments | jq
 ```
 
 ### Individual example directories
 
-Each sub-directory is also usable as a standalone reference:
+Each sub-directory is also a standalone reference:
 
-| Directory | Description |
+| Directory | Features demonstrated |
 |---|---|
-| `examples/basic/` | Rate limiting only — Users + Products services |
-| `examples/jwt-auth/` | JWT auth — Auth service + Orders service |
-| `examples/api-key-auth/` | API key auth — Reports service |
+| `examples/basic/` | Rate limiting — Users + Products services |
+| `examples/jwt-auth/` | JWT authentication — Auth + Orders services |
+| `examples/api-key-auth/` | API key authentication — Reports service |
+| `examples/circuit-breaker/` | Circuit breaker — Payments service with runtime mode toggling |
 
 ---
 
@@ -499,7 +656,10 @@ Express app
   │
   ├─ authMiddleware         per-route — JWT or API key check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
+  ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
   ├─ http-proxy-middleware  proxies request to upstream, forwards body
+  │    ├─ proxyRes          5xx responses → recordFailure
+  │    └─ error             network errors → recordFailure, responds 502
   │
   └─ error handler          catches unhandled errors → 500 JSON response
 ```

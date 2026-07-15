@@ -1,48 +1,5 @@
-import { z } from "zod";
 import type { Gateway } from "../types/gateway";
-
-const ProxySchema = z.object({
-  target: z.url("Proxy target must be a valid URL"),
-  isSecure: z.boolean().optional(),
-  changeOrigin: z.boolean().optional(),
-  pathRewrite: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  method: z.string().optional(),
-  timeout: z.number().positive("Proxy timeout must be a positive number").optional(),
-});
-
-const RateLimitSchema = z.object({
-  max: z.number().positive("Rate limit max must be a positive number"),
-  windowMs: z.number().positive("Rate limit windowMs must be a positive number"),
-  statusCode: z.number().optional(),
-  message: z.string().optional(),
-});
-
-const JwtAuthSchema = z.object({
-  enabled: z.boolean(),
-  strategy: z.literal("jwt"),
-  secret: z.string().optional(),
-  publicKey: z.string().optional(),
-  algorithms: z.array(z.string()).optional(),
-});
-
-const ApiKeyAuthSchema = z.object({
-  enabled: z.boolean(),
-  strategy: z.literal("apiKey"),
-  header: z.string().optional(),
-  keys: z.array(z.string()).min(1, "apiKey auth requires at least one key"),
-});
-
-const AuthSchema = z.discriminatedUnion("strategy", [JwtAuthSchema, ApiKeyAuthSchema]);
-
-const GatewaySchema = z.object({
-  baseURL: z.string().startsWith("/", "baseURL must start with /"),
-  proxy: ProxySchema,
-  rateLimit: RateLimitSchema.optional(),
-  auth: AuthSchema.optional(),
-});
-
-export const GatewaysSchema = z.array(GatewaySchema);
+import { GatewaysSchema } from "./validators/gateway.schema";
 
 export function validateRoutes(data: unknown): Gateway[] {
   const result = GatewaysSchema.safeParse(data);

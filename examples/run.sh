@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cleanup() {
   echo ""
   echo "Shutting down all services..."
-  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$GATEWAY_PID" 2>/dev/null || true
-  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$GATEWAY_PID" 2>/dev/null || true
   echo "Done."
 }
 trap cleanup SIGINT SIGTERM
@@ -27,6 +27,9 @@ ORDERS_PID=$!
 
 node "$ROOT/examples/api-key-auth/upstream-reports.js" &
 REPORTS_PID=$!
+
+node "$ROOT/examples/circuit-breaker/upstream-payments.js" &
+PAYMENTS_PID=$!
 
 echo "Starting gateway..."
 cp "$ROOT/examples/.env" "$ROOT/.env"
@@ -52,6 +55,10 @@ echo ""
 echo "  ── API key protected ───────────────────────────────"
 echo "  Reports API     →  http://localhost:3000/reports    (x-api-key required)"
 echo "  Valid keys:         key-service-alpha-123 · key-service-beta-456"
+echo ""
+echo "  ── Circuit breaker ─────────────────────────────────"
+echo "  Payments API    →  http://localhost:3000/payments   (circuit breaker: 3 failures / 10 s)"
+echo "  Payments admin  →  http://localhost:4066            (toggle mode — not proxied)"
 echo ""
 echo "─────────────────────────────────────────────────────"
 echo " Try it out"
@@ -79,6 +86,31 @@ echo "  curl -s http://localhost:3000/reports -H 'x-api-key: key-service-alpha-1
 echo ""
 echo "  # Wrong key (401)"
 echo "  curl -s http://localhost:3000/reports -H 'x-api-key: wrong' | jq"
+echo ""
+echo "── Circuit breaker ──"
+echo "  # 1. Normal request (circuit CLOSED)"
+echo "  curl -s http://localhost:3000/payments | jq"
+echo ""
+echo "  # 2. Degrade the upstream"
+echo "  curl -s -X POST http://localhost:4066/mode \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"mode\":\"failing\"}' | jq"
+echo ""
+echo "  # 3. Trigger threshold (3 failures open the circuit)"
+echo "  curl -s http://localhost:3000/payments | jq  # failure 1"
+echo "  curl -s http://localhost:3000/payments | jq  # failure 2"
+echo "  curl -s http://localhost:3000/payments | jq  # failure 3 → circuit OPEN"
+echo ""
+echo "  # 4. Observe the open circuit (503 + Retry-After, upstream not hit)"
+echo "  curl -si http://localhost:3000/payments | head -20"
+echo ""
+echo "  # 5. Restore the upstream"
+echo "  curl -s -X POST http://localhost:4066/mode \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"mode\":\"healthy\"}' | jq"
+echo ""
+echo "  # 6. Wait 10 s, then probe closes the circuit"
+echo "  sleep 11 && curl -s http://localhost:3000/payments | jq"
 echo "─────────────────────────────────────────────────────"
 echo ""
 

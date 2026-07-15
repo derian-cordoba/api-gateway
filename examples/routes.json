@@ -60,5 +60,18 @@
       "header": "x-api-key",
       "keys": ["key-service-alpha-123", "key-service-beta-456"]
     }
+  },
+  {
+    "baseURL": "/payments",
+    "proxy": {
+      "target": "http://localhost:4006",
+      "changeOrigin": true,
+      "pathRewrite": { "^/payments": "" }
+    },
+    "circuitBreaker": {
+      "threshold": 3,
+      "timeout": 10000,
+      "successThreshold": 1
+    }
   }
 ]

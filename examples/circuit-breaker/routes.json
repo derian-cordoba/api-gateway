@@ -1,0 +1,15 @@
+[
+  {
+    "baseURL": "/payments",
+    "proxy": {
+      "target": "http://localhost:4006",
+      "changeOrigin": true,
+      "pathRewrite": { "^/payments": "" }
+    },
+    "circuitBreaker": {
+      "threshold": 3,
+      "timeout": 10000,
+      "successThreshold": 1
+    }
+  }
+]
