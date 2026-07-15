@@ -1,5 +1,6 @@
 import type { Router, Request, Response, NextFunction, RequestHandler } from "express";
 import type { Options } from "http-proxy-middleware";
+import type { Server as HttpServer } from "node:http";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 
 import rateLimit from "express-rate-limit";
@@ -12,6 +13,7 @@ import { createAuthMiddleware } from "../middleware/authMiddleware";
 import { createIpFilterMiddleware } from "../middleware/ipFilter";
 import { CircuitBreaker } from "../middleware/circuit-breaker/CircuitBreaker";
 import { CircuitBreakerProxyHandlers } from "../middleware/circuit-breaker/CircuitBreakerProxyHandlers";
+import { LoadBalancer } from "../middleware/load-balancer/LoadBalancer";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 
@@ -21,7 +23,7 @@ export class ProxyManager {
   private readonly router: Router;
   private readonly filePath: string;
 
-  constructor(router: Router) {
+  constructor(router: Router, private readonly httpServer?: HttpServer) {
     this.router = router;
     this.filePath = appEnv.routes.filePath;
   }
@@ -58,10 +60,28 @@ export class ProxyManager {
       this.router.use(route.baseURL, this.buildCircuitBreakerGuard(breaker));
     }
 
-    this.router.use(route.baseURL, createProxyMiddleware(this.buildProxyOptions(route, breaker)));
+    const balancer = route.proxy.targets
+      ? new LoadBalancer(route.proxy.targets, route.proxy.strategy ?? "round-robin")
+      : null;
+
+    const proxyMiddleware = createProxyMiddleware(this.buildProxyOptions(route, breaker, balancer));
+
+    this.router.use(route.baseURL, proxyMiddleware);
+
+    if (route.proxy.ws && this.httpServer) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.httpServer.on("upgrade", (proxyMiddleware as any).upgrade);
+      logger.info({ baseURL: route.baseURL }, "WebSocket upgrade handler registered");
+    }
 
     logger.info(
-      { baseURL: route.baseURL, target: route.proxy.target, circuitBreaker: !!breaker },
+      {
+        baseURL: route.baseURL,
+        targets: route.proxy.targets?.map((t) => t.url) ?? [route.proxy.target!],
+        strategy: route.proxy.strategy ?? (route.proxy.targets ? "round-robin" : undefined),
+        circuitBreaker: !!breaker,
+        ws: !!route.proxy.ws,
+      },
       "Registered proxy route",
     );
   }
@@ -89,15 +109,60 @@ export class ProxyManager {
     };
   }
 
-  private buildProxyOptions(route: Gateway, breaker: CircuitBreaker | null) {
-    return { ...route.proxy, on: this.buildProxyOnHandlers(breaker) };
+  private buildProxyOptions(
+    route: Gateway,
+    breaker: CircuitBreaker | null,
+    balancer: LoadBalancer | null,
+  ): Options {
+    const { target, targets, strategy, ...proxyRest } = route.proxy;
+
+    // Suppress unused variable warnings for destructured custom fields
+    void targets;
+    void strategy;
+
+    const options: Options = {
+      ...proxyRest,
+      on: this.buildProxyOnHandlers(breaker, balancer),
+    };
+
+    if (balancer) {
+      options.router = balancer.createRouterFn();
+    } else {
+      options.target = target;
+    }
+
+    return options;
   }
 
-  private buildProxyOnHandlers(breaker: CircuitBreaker | null): ProxyOnHandlers {
-    const base: ProxyOnHandlers = { proxyReq: fixRequestBody };
-    if (!breaker) return base;
+  private buildProxyOnHandlers(
+    breaker: CircuitBreaker | null,
+    balancer: LoadBalancer | null,
+  ): ProxyOnHandlers {
+    const handlers: ProxyOnHandlers = { proxyReq: fixRequestBody };
 
-    return { ...base, ...new CircuitBreakerProxyHandlers(breaker).toOnHandlers() };
+    const cbHandlers = breaker ? new CircuitBreakerProxyHandlers(breaker).toOnHandlers() : null;
+
+    if (cbHandlers) {
+      handlers.proxyRes = cbHandlers.proxyRes;
+      handlers.error = cbHandlers.error;
+    }
+
+    if (balancer) {
+      const prevProxyRes = handlers.proxyRes;
+      const prevError = handlers.error;
+
+      handlers.proxyRes = (proxyRes, req, res) => {
+        if (prevProxyRes) prevProxyRes(proxyRes, req, res);
+        balancer.onConnectionClosed(req);
+      };
+
+      handlers.error = (err, req, res) => {
+        if (prevError) prevError(err, req, res);
+        balancer.onConnectionClosed(req);
+      };
+    }
+
+    return handlers;
   }
 
   private async readRoutes(): Promise<Gateway[]> {

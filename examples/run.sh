@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cleanup() {
   echo ""
   echo "Shutting down all services..."
-  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
-  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$CATALOG_A_PID" "$CATALOG_B_PID" "$CATALOG_C_PID" "$CHAT_PID" "$GATEWAY_PID" 2>/dev/null || true
+  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$CATALOG_A_PID" "$CATALOG_B_PID" "$CATALOG_C_PID" "$CHAT_PID" "$GATEWAY_PID" 2>/dev/null || true
   echo "Done."
 }
 trap cleanup SIGINT SIGTERM
@@ -36,6 +36,18 @@ INVENTORY_PID=$!
 
 node "$ROOT/examples/ip-filter/upstream-analytics.js" &
 ANALYTICS_PID=$!
+
+CATALOG_PORT=4010 CATALOG_INSTANCE=A node "$ROOT/examples/load-balancer/upstream-catalog.js" &
+CATALOG_A_PID=$!
+
+CATALOG_PORT=4011 CATALOG_INSTANCE=B node "$ROOT/examples/load-balancer/upstream-catalog.js" &
+CATALOG_B_PID=$!
+
+CATALOG_PORT=4012 CATALOG_INSTANCE=C node "$ROOT/examples/load-balancer/upstream-catalog.js" &
+CATALOG_C_PID=$!
+
+node "$ROOT/examples/websocket/upstream-chat.js" &
+CHAT_PID=$!
 
 echo "Starting gateway..."
 cp "$ROOT/examples/.env" "$ROOT/.env"
@@ -72,6 +84,15 @@ echo ""
 echo "  ── IP filter ───────────────────────────────────────"
 echo "  Analytics       →  http://localhost:3000/analytics/public   (no restriction)"
 echo "  Analytics       →  http://localhost:3000/analytics/internal (allow: 127.0.0.1)"
+echo ""
+echo "  ── Load balancing ──────────────────────────────────"
+echo "  Catalog API     →  http://localhost:3000/catalog             (round-robin: A · B · C)"
+echo "  Catalog A       →  http://localhost:4010"
+echo "  Catalog B       →  http://localhost:4011"
+echo "  Catalog C       →  http://localhost:4012"
+echo ""
+echo "  ── WebSocket ───────────────────────────────────────"
+echo "  Chat WebSocket  →  ws://localhost:3000/chat                  (ws: true)"
 echo ""
 echo "─────────────────────────────────────────────────────"
 echo " Try it out"
@@ -138,6 +159,15 @@ echo "  curl -s http://localhost:3000/analytics/public | jq"
 echo ""
 echo "  # Internal route — allow: 127.0.0.1 — passes from loopback"
 echo "  curl -s http://localhost:3000/analytics/internal | jq"
+echo ""
+echo "── Load balancing (round-robin across A · B · C) ──"
+echo "  for i in 1 2 3 4; do"
+echo "    curl -s http://localhost:3000/catalog | jq '{ instance, port }'"
+echo "  done"
+echo ""
+echo "── WebSocket ──"
+echo "  # Install a WS client first: npm i -g wscat"
+echo "  wscat -c ws://localhost:3000/chat"
 echo "─────────────────────────────────────────────────────"
 echo ""
 

@@ -1,6 +1,6 @@
 # API Gateway
 
-A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, structured logging, and full security headers out of the box.
+A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route load balancing, rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, WebSocket proxying, structured logging, and full security headers out of the box.
 
 ---
 
@@ -16,6 +16,8 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
   - [JWT](#jwt)
   - [API Key](#api-key)
 - [Circuit Breaker](#circuit-breaker)
+- [Load Balancing](#load-balancing)
+- [WebSocket Proxying](#websocket-proxying)
 - [Request ID Propagation](#request-id-propagation)
 - [IP Allowlist / Blocklist](#ip-allowlist--blocklist)
 - [Running the Gateway](#running-the-gateway)
@@ -34,6 +36,8 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
 - **Request ID propagation** — every request receives a `X-Request-ID` header (generated UUID v4 if absent, forwarded unchanged if already set); the same ID appears in the response header, every gateway log line, and the request forwarded to the upstream — enabling end-to-end request tracing with no external infrastructure
 - **IP allowlist / blocklist** — per-route IPv4 and CIDR-range filtering; deny list is evaluated first, allow list restricts access to specified addresses only; IPv4-mapped IPv6 addresses are normalised automatically
+- **Load balancing** — distribute traffic across multiple upstream targets with three strategies: `round-robin` (default), `weighted` (proportional weight per target), and `least-connections` (always forwards to the least-busy upstream); fully composable with auth, rate limiting, and the circuit breaker
+- **WebSocket proxying** — enable `ws: true` on any route to proxy WebSocket upgrade requests transparently; all subsequent frames are tunnelled to the upstream without additional configuration
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
 - **Security headers** — full `helmet` defaults applied to every response (`CSP`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`, etc.)
@@ -124,7 +128,7 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
 ```ts
 {
   baseURL:         string          // required — path prefix to match, must start with "/"
-  proxy:           Proxy          // required — upstream proxy settings
+  proxy:           Proxy          // required — upstream proxy settings (single target or load-balanced targets)
   rateLimit?:      RateLimit      // optional — per-route rate limiting
   auth?:           Auth           // optional — per-route authentication
   circuitBreaker?: CircuitBreaker // optional — per-route circuit breaker
@@ -134,15 +138,27 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
 
 #### `Proxy`
 
+Exactly one of `target` or `targets` must be provided.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `target` | `string` | ✅ | Target upstream URL (must be a valid URL). |
+| `target` | `string` | ✅ (or `targets`) | Single upstream URL. Mutually exclusive with `targets`. |
+| `targets` | `WeightedTarget[]` | ✅ (or `target`) | Two or more upstream URLs for load balancing. Mutually exclusive with `target`. |
+| `strategy` | `"round-robin" \| "weighted" \| "least-connections"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
+| `ws` | `boolean` | — | Enable WebSocket proxying for this route. |
 | `changeOrigin` | `boolean` | — | Rewrite the `Host` header to the target origin. |
 | `pathRewrite` | `{ [pattern]: replacement }` | — | Regex path rewrite rules applied before forwarding. |
 | `headers` | `{ [name]: value }` | — | Extra headers added to every forwarded request. |
 | `isSecure` | `boolean` | — | Verify the upstream TLS certificate. |
 | `method` | `string` | — | Override the HTTP method forwarded to the upstream. |
 | `timeout` | `number` | — | Proxy request timeout in milliseconds. |
+
+**`WeightedTarget`**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | `string` | ✅ | Upstream URL for this target. |
+| `weight` | `number` | — | Relative weight for the `"weighted"` strategy. Higher values receive proportionally more traffic. Defaults to `1`. Ignored by other strategies. |
 
 #### `RateLimit`
 
@@ -266,6 +282,26 @@ Both fields accept plain IPv4 addresses (`192.168.1.1`) and CIDR notation (`10.0
     },
     "ipFilter": {
       "allow": ["10.0.0.0/8", "172.16.0.0/12"]
+    }
+  },
+  {
+    "baseURL": "/catalog",
+    "proxy": {
+      "targets": [
+        { "url": "http://catalog-a:3006", "weight": 1 },
+        { "url": "http://catalog-b:3007", "weight": 2 }
+      ],
+      "strategy": "weighted",
+      "changeOrigin": true,
+      "pathRewrite": { "^/catalog": "" }
+    }
+  },
+  {
+    "baseURL": "/realtime",
+    "proxy": {
+      "target": "http://ws-service:3008",
+      "changeOrigin": true,
+      "ws": true
     }
   }
 ]
@@ -460,6 +496,144 @@ Circuit breaking and rate limiting are independent and can be applied to the sam
 
 ---
 
+## Load Balancing
+
+Distribute traffic across multiple upstream instances by replacing the single `proxy.target` string with a `proxy.targets` array. Three strategies are supported.
+
+### Strategies
+
+| Strategy | Behaviour |
+|---|---|
+| `round-robin` (default) | Cycles through targets in order: A → B → C → A → … |
+| `weighted` | Each target carries traffic proportional to its `weight`. A target with `weight: 2` receives twice as many requests as one with `weight: 1`. The cycle is deterministic (not random). |
+| `least-connections` | Always forwards to the target with the fewest active connections. Best for routes where upstream processing time varies significantly. |
+
+### Configuration
+
+**Round-robin (3 equal instances):**
+
+```json
+{
+  "baseURL": "/catalog",
+  "proxy": {
+    "targets": [
+      { "url": "http://catalog-a:3001" },
+      { "url": "http://catalog-b:3002" },
+      { "url": "http://catalog-c:3003" }
+    ],
+    "changeOrigin": true,
+    "pathRewrite": { "^/catalog": "" }
+  }
+}
+```
+
+**Weighted (B carries twice as much traffic as A or C):**
+
+```json
+{
+  "baseURL": "/catalog",
+  "proxy": {
+    "targets": [
+      { "url": "http://catalog-a:3001", "weight": 1 },
+      { "url": "http://catalog-b:3002", "weight": 2 },
+      { "url": "http://catalog-c:3003", "weight": 1 }
+    ],
+    "strategy": "weighted",
+    "changeOrigin": true
+  }
+}
+```
+
+**Least-connections:**
+
+```json
+{
+  "baseURL": "/api",
+  "proxy": {
+    "targets": [
+      { "url": "http://api-1:3001" },
+      { "url": "http://api-2:3002" }
+    ],
+    "strategy": "least-connections",
+    "changeOrigin": true
+  }
+}
+```
+
+### Composing with other features
+
+Load balancing is fully composable with every other per-route feature:
+
+```json
+{
+  "baseURL": "/api",
+  "proxy": {
+    "targets": [
+      { "url": "http://api-1:3001", "weight": 2 },
+      { "url": "http://api-2:3002", "weight": 1 }
+    ],
+    "strategy": "weighted",
+    "changeOrigin": true
+  },
+  "rateLimit": { "max": 100, "windowMs": 60000 },
+  "auth": { "enabled": true, "strategy": "apiKey", "keys": ["svc-key-xyz"] },
+  "circuitBreaker": { "threshold": 5, "timeout": 30000 }
+}
+```
+
+The circuit breaker wraps the load-balanced pool as a whole. If the breaker opens, all targets are bypassed until recovery.
+
+---
+
+## WebSocket Proxying
+
+Enable WebSocket proxying by adding `"ws": true` to any proxy configuration. The gateway intercepts the HTTP Upgrade handshake on the raw TCP server and tunnels all subsequent WebSocket frames transparently to the upstream.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/chat",
+  "proxy": {
+    "target": "http://chat-service:4000",
+    "changeOrigin": true,
+    "pathRewrite": { "^/chat": "" },
+    "ws": true
+  }
+}
+```
+
+### How it works
+
+Standard HTTP requests to `/chat` are proxied normally. When a client sends an HTTP Upgrade request, the gateway attaches the proxy middleware's upgrade handler to the raw HTTP server's `upgrade` event, so WebSocket connections are forwarded at the transport level without involving Express middleware.
+
+### Usage
+
+```bash
+# Connect through the gateway (requires wscat: npm i -g wscat)
+wscat -c ws://localhost:3000/chat
+
+# Inspect the raw upgrade handshake
+curl -si http://localhost:3000/chat \
+  -H "Upgrade: websocket" \
+  -H "Connection: Upgrade" \
+  -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  -H "Sec-WebSocket-Version: 13" | head -6
+
+# HTTP/1.1 101 Switching Protocols
+# Upgrade: websocket
+# Connection: Upgrade
+# Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+```
+
+### Notes
+
+- `ws: true` can be combined with `pathRewrite`, `headers`, `changeOrigin`, and `timeout`.
+- WebSocket and load balancing can be combined. Note that WebSocket connections are long-lived; `least-connections` is the most effective strategy in that case since it naturally directs new connections to the least-loaded instance.
+- Auth, rate limiting, and IP filtering apply only to the initial HTTP Upgrade request. Once the connection is established, frames flow directly through the proxy.
+
+---
+
 ## Request ID Propagation
 
 Every request that passes through the gateway is assigned a unique `X-Request-ID` header. This ID ties together the gateway log line, the request forwarded to the upstream, and the response returned to the caller — letting you trace any individual request across your entire stack with a single value.
@@ -651,9 +825,11 @@ src/apps/api-gateway/
 │   │   ├── AuthStrategy.ts       # Interface (Strategy pattern)
 │   │   ├── JwtAuthStrategy.ts    # JWT Bearer token validation (HMAC + RSA/EC)
 │   │   └── ApiKeyAuthStrategy.ts # Header-based API key validation
-│   └── circuit-breaker/
-│       ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
-│       └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
+│   ├── circuit-breaker/
+│   │   ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
+│   │   └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
+│   └── load-balancer/
+│       └── LoadBalancer.ts       # Round-robin, weighted, and least-connections strategies
 │
 ├── routes/
 │   ├── Router.ts             # Middleware pipeline (logging → security → CORS → body → proxy → errors)
@@ -670,11 +846,12 @@ src/apps/api-gateway/
 │
 └── types/
     ├── gateway.d.ts          # Gateway type
-    ├── proxy.d.ts            # Proxy type
+    ├── proxy.d.ts            # Proxy type (single target or load-balanced targets)
     ├── rate-limit.d.ts       # RateLimit type
     ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
     ├── circuit-breaker.d.ts  # CircuitBreakerConfig type
-    └── ip-filter.d.ts        # IpFilter type
+    ├── ip-filter.d.ts        # IpFilter type
+    └── load-balancer.d.ts    # WeightedTarget, BalancerStrategy types
 ```
 
 ---
@@ -703,6 +880,8 @@ Copies `examples/.env` to the project root and starts all services. Once running
 | `http://localhost:3000/inventory` | Request ID | Inventory service — echoes the forwarded ID |
 | `http://localhost:3000/analytics/public` | — | Analytics service — open to all |
 | `http://localhost:3000/analytics/internal` | IP filter | Analytics service — allow: `127.0.0.1` |
+| `http://localhost:3000/catalog` | Load balancing | Catalog service — round-robin across A, B, C |
+| `ws://localhost:3000/chat` | WebSocket | Chat service — WS echo server |
 
 ### Public routes
 
@@ -798,6 +977,41 @@ curl -s -X POST http://localhost:4066/mode \
 sleep 11 && curl -s http://localhost:3000/payments | jq
 ```
 
+### Load-balanced route (`/catalog`)
+
+```bash
+# Each response includes { instance, port } — watch the instance field cycle
+for i in 1 2 3 4; do
+  curl -s http://localhost:3000/catalog | jq '{ instance, port }'
+done
+# { "instance": "A", "port": 4010 }
+# { "instance": "B", "port": 4011 }
+# { "instance": "C", "port": 4012 }
+# { "instance": "A", "port": 4010 }
+```
+
+### WebSocket route (`/chat`)
+
+```bash
+# Install a WS client (choose one)
+npm install -g wscat       # npm
+brew install websocat      # Homebrew
+
+# Connect through the gateway — WS frames are proxied transparently
+wscat -c ws://localhost:3000/chat
+# Connected
+# < [server] Welcome! You are client #1. Type a message and press Enter.
+# > hello world
+# < [echo] hello world
+
+# Inspect the raw upgrade handshake with curl
+curl -si http://localhost:3000/chat \
+  -H "Upgrade: websocket" \
+  -H "Connection: Upgrade" \
+  -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  -H "Sec-WebSocket-Version: 13" | head -6
+```
+
 ### Individual example directories
 
 Each sub-directory is also a standalone reference:
@@ -810,6 +1024,8 @@ Each sub-directory is also a standalone reference:
 | `examples/circuit-breaker/` | Circuit breaker — Payments service with runtime mode toggling |
 | `examples/request-id/` | Request ID propagation — Inventory service that echoes the forwarded ID end-to-end |
 | `examples/ip-filter/` | IP allowlist / blocklist — Analytics service with three routes (open / allow / deny) |
+| `examples/load-balancer/` | Load balancing — Catalog service with three instances; demonstrates round-robin, weighted, and least-connections |
+| `examples/websocket/` | WebSocket proxying — Chat echo server; raw RFC 6455 implementation using Node.js built-ins |
 
 ---
 
@@ -818,10 +1034,10 @@ Each sub-directory is also a standalone reference:
 ### Request lifecycle
 
 ```
-Client
+Client (HTTP or WebSocket)
   │
   ▼
-Express app
+Express app / raw HTTP server
   │
   ├─ requestId              inject / forward X-Request-ID header
   ├─ pino-http              structured request/response logging (req.id = X-Request-ID)
@@ -836,9 +1052,13 @@ Express app
   ├─ authMiddleware         per-route — JWT or API key check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
-  ├─ http-proxy-middleware  proxies request to upstream, forwards body
-  │    ├─ proxyRes          5xx responses → recordFailure
-  │    └─ error             network errors → recordFailure, responds 502
+  ├─ http-proxy-middleware  proxies request to upstream; load balancer selects target
+  │    ├─ router()          load balancer pick (round-robin / weighted / least-connections)
+  │    ├─ proxyReq          fix request body; open connection (least-connections)
+  │    ├─ proxyRes          5xx → recordFailure; close connection (least-connections)
+  │    └─ error             network error → recordFailure + 502; close connection
+  │
+  ├─ WS upgrade (server)    per-ws-route — tunnels WebSocket frames to upstream
   │
   └─ error handler          catches unhandled errors → 500 JSON response
 ```

@@ -24,7 +24,7 @@ export class Server {
    * Call this before start() or use it directly in tests with getApp().
    */
   async init(): Promise<void> {
-    await this.router.init();
+    await this.router.init(this.httpServer);
     this.app.use(this.prefix, this.router.getRouter());
   }
 

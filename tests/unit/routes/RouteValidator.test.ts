@@ -305,4 +305,176 @@ describe("validateRoutes", () => {
       ).toThrow("IP list must contain at least one entry");
     });
   });
+
+  describe("proxy field — load balancing", () => {
+    it("accepts targets array with round-robin (default strategy)", () => {
+      const [route] = validateRoutes([
+        {
+          baseURL: "/lb",
+          proxy: {
+            targets: [
+              { url: "http://localhost:3001" },
+              { url: "http://localhost:3002" },
+            ],
+          },
+        },
+      ]);
+      expect(route.proxy.targets).toHaveLength(2);
+      expect(route.proxy.strategy).toBeUndefined();
+    });
+
+    it("accepts targets with explicit strategy: weighted", () => {
+      const [route] = validateRoutes([
+        {
+          baseURL: "/lb",
+          proxy: {
+            targets: [
+              { url: "http://localhost:3001", weight: 1 },
+              { url: "http://localhost:3002", weight: 2 },
+            ],
+            strategy: "weighted",
+          },
+        },
+      ]);
+      expect(route.proxy.strategy).toBe("weighted");
+      expect(route.proxy.targets?.[1].weight).toBe(2);
+    });
+
+    it("accepts targets with strategy: least-connections and custom weights", () => {
+      const [route] = validateRoutes([
+        {
+          baseURL: "/lb",
+          proxy: {
+            targets: [
+              { url: "http://localhost:3001", weight: 5 },
+              { url: "http://localhost:3002", weight: 3 },
+            ],
+            strategy: "least-connections",
+          },
+        },
+      ]);
+      expect(route.proxy.strategy).toBe("least-connections");
+    });
+
+    it("throws when both target and targets are set", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/lb",
+            proxy: {
+              target: "http://localhost:3001",
+              targets: [
+                { url: "http://localhost:3001" },
+                { url: "http://localhost:3002" },
+              ],
+            },
+          },
+        ])
+      ).toThrow("Proxy must have exactly one of: target (single URL) or targets (load-balanced array)");
+    });
+
+    it("throws when neither target nor targets is set", () => {
+      expect(() =>
+        validateRoutes([{ baseURL: "/lb", proxy: {} }])
+      ).toThrow();
+    });
+
+    it("throws when targets has only one entry (min 2)", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/lb",
+            proxy: {
+              targets: [{ url: "http://localhost:3001" }],
+            },
+          },
+        ])
+      ).toThrow("Load balancer requires at least two targets");
+    });
+
+    it("throws when strategy is set without targets", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/lb",
+            proxy: {
+              target: "http://localhost:3001",
+              strategy: "round-robin",
+            },
+          },
+        ])
+      ).toThrow("strategy is only valid when targets is set");
+    });
+
+    it("throws when a target url is not a valid URL", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/lb",
+            proxy: {
+              targets: [
+                { url: "not-a-url" },
+                { url: "http://localhost:3002" },
+              ],
+            },
+          },
+        ])
+      ).toThrow("Target URL must be a valid URL");
+    });
+
+    it("throws when target weight is not a positive integer", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/lb",
+            proxy: {
+              targets: [
+                { url: "http://localhost:3001", weight: 0 },
+                { url: "http://localhost:3002", weight: 1 },
+              ],
+            },
+          },
+        ])
+      ).toThrow("Target weight must be a positive integer");
+    });
+  });
+
+  describe("proxy field — WebSocket", () => {
+    it("accepts proxy.ws: true with a single target", () => {
+      const [route] = validateRoutes([
+        {
+          baseURL: "/ws",
+          proxy: {
+            target: "http://localhost:3001",
+            ws: true,
+          },
+        },
+      ]);
+      expect(route.proxy.ws).toBe(true);
+    });
+
+    it("ws is optional (omitting it is fine)", () => {
+      const [route] = validateRoutes([
+        {
+          baseURL: "/api",
+          proxy: { target: "http://localhost:3001" },
+        },
+      ]);
+      expect(route.proxy.ws).toBeUndefined();
+    });
+
+    it("throws when ws is not a boolean", () => {
+      expect(() =>
+        validateRoutes([
+          {
+            baseURL: "/ws",
+            proxy: {
+              target: "http://localhost:3001",
+              ws: "true",
+            },
+          },
+        ])
+      ).toThrow();
+    });
+  });
 });

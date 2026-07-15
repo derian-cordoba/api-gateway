@@ -1,0 +1,40 @@
+[
+  {
+    "baseURL": "/catalog/rr",
+    "proxy": {
+      "targets": [
+        { "url": "http://localhost:4010" },
+        { "url": "http://localhost:4011" },
+        { "url": "http://localhost:4012" }
+      ],
+      "changeOrigin": true,
+      "pathRewrite": { "^/catalog/rr": "" }
+    }
+  },
+  {
+    "baseURL": "/catalog/weighted",
+    "proxy": {
+      "targets": [
+        { "url": "http://localhost:4010", "weight": 1 },
+        { "url": "http://localhost:4011", "weight": 2 },
+        { "url": "http://localhost:4012", "weight": 1 }
+      ],
+      "strategy": "weighted",
+      "changeOrigin": true,
+      "pathRewrite": { "^/catalog/weighted": "" }
+    }
+  },
+  {
+    "baseURL": "/catalog/lc",
+    "proxy": {
+      "targets": [
+        { "url": "http://localhost:4010" },
+        { "url": "http://localhost:4011" },
+        { "url": "http://localhost:4012" }
+      ],
+      "strategy": "least-connections",
+      "changeOrigin": true,
+      "pathRewrite": { "^/catalog/lc": "" }
+    }
+  }
+]

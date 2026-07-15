@@ -1,3 +1,4 @@
+import type { Server as HttpServer } from "node:http";
 import express, {
   Router as ExpressRouter,
   type NextFunction,
@@ -33,7 +34,7 @@ export class Router {
    * Initialise all middleware and routes. Must be awaited before the HTTP
    * server starts listening so that proxy routes are registered in time.
    */
-  async init(): Promise<void> {
+  async init(httpServer?: HttpServer): Promise<void> {
     // Inject / forward X-Request-ID before logging so every log line carries it
     this.router.use(createRequestIdMiddleware());
 
@@ -53,7 +54,7 @@ export class Router {
     this.router.use(createHealthRouter());
 
     // Proxy routes (async — reads config file / env var)
-    await this.configureProxyManager();
+    await this.configureProxyManager(httpServer);
 
     // Error handler must be registered last
     this.configureErrorHandler();
@@ -76,8 +77,8 @@ export class Router {
     this.router.use(compress());
   }
 
-  private async configureProxyManager(): Promise<void> {
-    const proxyManager = new ProxyManager(this.router);
+  private async configureProxyManager(httpServer?: HttpServer): Promise<void> {
+    const proxyManager = new ProxyManager(this.router, httpServer);
     await proxyManager.registerProxyRoutes();
   }
 

@@ -100,5 +100,27 @@
     "ipFilter": {
       "allow": ["127.0.0.1"]
     }
+  },
+  {
+    "baseURL": "/catalog",
+    "proxy": {
+      "targets": [
+        { "url": "http://localhost:4010" },
+        { "url": "http://localhost:4011", "weight": 2 },
+        { "url": "http://localhost:4012" }
+      ],
+      "strategy": "round-robin",
+      "changeOrigin": true,
+      "pathRewrite": { "^/catalog": "" }
+    }
+  },
+  {
+    "baseURL": "/chat",
+    "proxy": {
+      "target": "http://localhost:4020",
+      "changeOrigin": true,
+      "pathRewrite": { "^/chat": "" },
+      "ws": true
+    }
   }
 ]

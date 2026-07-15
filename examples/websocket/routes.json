@@ -1,0 +1,19 @@
+[
+  {
+    "baseURL": "/chat",
+    "proxy": {
+      "target": "http://localhost:4020",
+      "changeOrigin": true,
+      "pathRewrite": { "^/chat": "" },
+      "ws": true
+    }
+  },
+  {
+    "baseURL": "/chat-status",
+    "proxy": {
+      "target": "http://localhost:4020",
+      "changeOrigin": true,
+      "pathRewrite": { "^/chat-status": "" }
+    }
+  }
+]
