@@ -1,0 +1,32 @@
+[
+  {
+    "baseURL": "/analytics/public",
+    "proxy": {
+      "target": "http://localhost:4008",
+      "changeOrigin": true,
+      "pathRewrite": { "^/analytics/public": "" }
+    }
+  },
+  {
+    "baseURL": "/analytics/internal",
+    "proxy": {
+      "target": "http://localhost:4008",
+      "changeOrigin": true,
+      "pathRewrite": { "^/analytics/internal": "" }
+    },
+    "ipFilter": {
+      "allow": ["127.0.0.1"]
+    }
+  },
+  {
+    "baseURL": "/analytics/blocked",
+    "proxy": {
+      "target": "http://localhost:4008",
+      "changeOrigin": true,
+      "pathRewrite": { "^/analytics/blocked": "" }
+    },
+    "ipFilter": {
+      "deny": ["127.0.0.1"]
+    }
+  }
+]

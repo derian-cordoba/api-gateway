@@ -13,6 +13,7 @@ import { ProxyManager } from "./ProxyManager";
 import { createHealthRouter } from "./HealthRouter";
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
+import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requestId";
 
 export class Router {
   private readonly router: ExpressRouter;
@@ -33,8 +34,11 @@ export class Router {
    * server starts listening so that proxy routes are registered in time.
    */
   async init(): Promise<void> {
-    // Structured HTTP request logging
-    this.router.use(pinoHttp({ logger }));
+    // Inject / forward X-Request-ID before logging so every log line carries it
+    this.router.use(createRequestIdMiddleware());
+
+    // Structured HTTP request logging — reuse the request ID set above
+    this.router.use(pinoHttp({ logger, genReqId: (req) => req.headers[REQUEST_ID_HEADER] as string }));
 
     // Security headers (full helmet defaults)
     this.router.use(helmet());

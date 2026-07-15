@@ -246,4 +246,63 @@ describe("validateRoutes", () => {
       ).toThrow();
     });
   });
+
+  describe("ipFilter field", () => {
+    it("accepts ipFilter with only an allow list", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, ipFilter: { allow: ["192.168.1.1", "10.0.0.0/8"] } },
+      ]);
+      expect(route.ipFilter?.allow).toEqual(["192.168.1.1", "10.0.0.0/8"]);
+    });
+
+    it("accepts ipFilter with only a deny list", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, ipFilter: { deny: ["10.10.10.10"] } },
+      ]);
+      expect(route.ipFilter?.deny).toEqual(["10.10.10.10"]);
+    });
+
+    it("accepts ipFilter with both allow and deny lists", () => {
+      const [route] = validateRoutes([
+        { ...validRoute, ipFilter: { allow: ["192.168.0.0/16"], deny: ["192.168.1.1"] } },
+      ]);
+      expect(route.ipFilter?.allow).toEqual(["192.168.0.0/16"]);
+      expect(route.ipFilter?.deny).toEqual(["192.168.1.1"]);
+    });
+
+    it("omitting ipFilter leaves it undefined", () => {
+      const [route] = validateRoutes([validRoute]);
+      expect(route.ipFilter).toBeUndefined();
+    });
+
+    it("throws when ipFilter has neither allow nor deny", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, ipFilter: {} }])
+      ).toThrow("ipFilter must specify at least one of: allow, deny");
+    });
+
+    it("throws when an allow entry is not a valid IPv4 or CIDR", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, ipFilter: { allow: ["not-an-ip"] } }])
+      ).toThrow();
+    });
+
+    it("throws when a deny entry is not a valid IPv4 or CIDR", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, ipFilter: { deny: ["not-an-ip-address"] } }])
+      ).toThrow();
+    });
+
+    it("throws when allow list is empty", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, ipFilter: { allow: [] } }])
+      ).toThrow("IP list must contain at least one entry");
+    });
+
+    it("throws when deny list is empty", () => {
+      expect(() =>
+        validateRoutes([{ ...validRoute, ipFilter: { deny: [] } }])
+      ).toThrow("IP list must contain at least one entry");
+    });
+  });
 });

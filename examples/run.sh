@@ -6,8 +6,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cleanup() {
   echo ""
   echo "Shutting down all services..."
-  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$GATEWAY_PID" 2>/dev/null || true
-  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  kill "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  wait "$USERS_PID" "$PRODUCTS_PID" "$AUTH_PID" "$ORDERS_PID" "$REPORTS_PID" "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
   echo "Done."
 }
 trap cleanup SIGINT SIGTERM
@@ -30,6 +30,12 @@ REPORTS_PID=$!
 
 node "$ROOT/examples/circuit-breaker/upstream-payments.js" &
 PAYMENTS_PID=$!
+
+node "$ROOT/examples/request-id/upstream-inventory.js" &
+INVENTORY_PID=$!
+
+node "$ROOT/examples/ip-filter/upstream-analytics.js" &
+ANALYTICS_PID=$!
 
 echo "Starting gateway..."
 cp "$ROOT/examples/.env" "$ROOT/.env"
@@ -57,8 +63,15 @@ echo "  Reports API     →  http://localhost:3000/reports    (x-api-key require
 echo "  Valid keys:         key-service-alpha-123 · key-service-beta-456"
 echo ""
 echo "  ── Circuit breaker ─────────────────────────────────"
-echo "  Payments API    →  http://localhost:3000/payments   (circuit breaker: 3 failures / 10 s)"
-echo "  Payments admin  →  http://localhost:4066            (toggle mode — not proxied)"
+echo "  Payments API    →  http://localhost:3000/payments            (circuit breaker: 3 failures / 10 s)"
+echo "  Payments admin  →  http://localhost:4066                     (toggle mode — not proxied)"
+echo ""
+echo "  ── Request ID propagation ──────────────────────────"
+echo "  Inventory API   →  http://localhost:3000/inventory           (X-Request-ID auto-generated & forwarded)"
+echo ""
+echo "  ── IP filter ───────────────────────────────────────"
+echo "  Analytics       →  http://localhost:3000/analytics/public   (no restriction)"
+echo "  Analytics       →  http://localhost:3000/analytics/internal (allow: 127.0.0.1)"
 echo ""
 echo "─────────────────────────────────────────────────────"
 echo " Try it out"
@@ -111,6 +124,20 @@ echo "    -d '{\"mode\":\"healthy\"}' | jq"
 echo ""
 echo "  # 6. Wait 10 s, then probe closes the circuit"
 echo "  sleep 11 && curl -s http://localhost:3000/payments | jq"
+echo ""
+echo "── Request ID ──"
+echo "  # Gateway auto-generates a UUID — visible in response headers and JSON body"
+echo "  curl -si http://localhost:3000/inventory | grep -i x-request-id"
+echo ""
+echo "  # Supply your own correlation ID — forwarded unchanged to the upstream"
+echo "  curl -si http://localhost:3000/inventory -H 'X-Request-ID: my-trace-abc'"
+echo ""
+echo "── IP filter ──"
+echo "  # Public route — no restrictions"
+echo "  curl -s http://localhost:3000/analytics/public | jq"
+echo ""
+echo "  # Internal route — allow: 127.0.0.1 — passes from loopback"
+echo "  curl -s http://localhost:3000/analytics/internal | jq"
 echo "─────────────────────────────────────────────────────"
 echo ""
 

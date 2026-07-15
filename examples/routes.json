@@ -73,5 +73,32 @@
       "timeout": 10000,
       "successThreshold": 1
     }
+  },
+  {
+    "baseURL": "/inventory",
+    "proxy": {
+      "target": "http://localhost:4007",
+      "changeOrigin": true,
+      "pathRewrite": { "^/inventory": "" }
+    }
+  },
+  {
+    "baseURL": "/analytics/public",
+    "proxy": {
+      "target": "http://localhost:4008",
+      "changeOrigin": true,
+      "pathRewrite": { "^/analytics/public": "" }
+    }
+  },
+  {
+    "baseURL": "/analytics/internal",
+    "proxy": {
+      "target": "http://localhost:4008",
+      "changeOrigin": true,
+      "pathRewrite": { "^/analytics/internal": "" }
+    },
+    "ipFilter": {
+      "allow": ["127.0.0.1"]
+    }
   }
 ]

@@ -1,5 +1,6 @@
 import { Auth } from "./auth";
 import { CircuitBreakerConfig } from "./circuit-breaker";
+import { IpFilter } from "./ip-filter";
 import { Proxy } from "./proxy";
 import { RateLimit } from "./rate-limit";
 
@@ -31,4 +32,12 @@ export declare type Gateway = {
    * and returns 503 until the service recovers.
    */
   circuitBreaker?: CircuitBreakerConfig;
+
+  /**
+   * IP allowlist / blocklist for the route.
+   * `deny` is evaluated first; a match returns 403.
+   * `allow` restricts access to listed IPs/CIDR ranges only.
+   * At least one of `allow` or `deny` must be provided when set.
+   */
+  ipFilter?: IpFilter;
 };

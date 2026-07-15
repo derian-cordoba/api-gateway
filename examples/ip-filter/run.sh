@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -e
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+cleanup() {
+  echo ""
+  echo "Shutting down all services..."
+  kill "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  wait "$ANALYTICS_PID" "$GATEWAY_PID" 2>/dev/null || true
+  echo "Done."
+}
+trap cleanup SIGINT SIGTERM
+
+echo "Starting upstream services..."
+node "$ROOT/examples/ip-filter/upstream-analytics.js" &
+ANALYTICS_PID=$!
+
+echo "Starting gateway..."
+cp "$ROOT/examples/ip-filter/.env" "$ROOT/.env"
+cd "$ROOT" && pnpm dev &
+GATEWAY_PID=$!
+
+sleep 2
+
+echo ""
+echo "  Services"
+echo "  ──────────────────────────────────────────────────────────"
+echo "  Gateway (public)   →  http://localhost:3000"
+echo "  Health check       →  http://localhost:3000/health"
+echo "  ──────────────────────────────────────────────────────────"
+echo ""
+echo "  Routes and IP policies"
+echo "  ┌──────────────────────────────┬──────────────────────────────────────┐"
+echo "  │ /analytics/public            │ No restriction — everyone allowed    │"
+echo "  │ /analytics/internal          │ allow: 127.0.0.1  (loopback only)    │"
+echo "  │ /analytics/blocked           │ deny:  127.0.0.1  (loopback blocked) │"
+echo "  └──────────────────────────────┴──────────────────────────────────────┘"
+echo ""
+echo "  How it works"
+echo "    • Deny list is evaluated first — a match returns 403 immediately."
+echo "    • Allow list restricts access to listed IPs/CIDR ranges only."
+echo "    • The upstream never receives blocked requests."
+echo "    • IPv4-mapped IPv6 addresses (::ffff:127.0.0.1) are normalised"
+echo "      automatically — no need to list both forms in the config."
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo " W A L K T H R O U G H"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "── Step 1 · Public route — no restrictions ────────────────────"
+echo ""
+echo "  # All IPs are allowed through; upstream responds normally."
+echo "  curl -s http://localhost:3000/analytics/public | jq"
+echo ""
+echo "── Step 2 · Allow-listed route — loopback only ────────────────"
+echo ""
+echo "  # Your loopback address (127.0.0.1) is in the allow list — passes."
+echo "  curl -s http://localhost:3000/analytics/internal | jq"
+echo ""
+echo "  # Notice that the upstream's stdout shows the request arrived."
+echo "  # Requests from any other IP would receive 403 Forbidden."
+echo ""
+echo "── Step 3 · Deny-listed route — loopback blocked ──────────────"
+echo ""
+echo "  # Your loopback address is in the deny list — 403 Forbidden."
+echo "  curl -s http://localhost:3000/analytics/blocked | jq"
+echo ""
+echo "  # Expected response:"
+echo "  # {"
+echo "  #   \"error\": \"Forbidden\","
+echo "  #   \"message\": \"Your IP address is not permitted to access this resource\""
+echo "  # }"
+echo ""
+echo "  # The upstream receives nothing — watch its stdout to confirm."
+echo ""
+echo "── Step 4 · Deny takes precedence over allow ──────────────────"
+echo ""
+echo "  # If you add the same IP to both allow and deny, deny wins."
+echo "  # This is enforced in the middleware evaluation order:"
+echo "  #   1. Check deny list  → reject immediately if matched"
+echo "  #   2. Check allow list → reject if NOT matched"
+echo ""
+echo "── Step 5 · CIDR ranges ────────────────────────────────────────"
+echo ""
+echo "  # The allow/deny lists accept IPv4 CIDR notation."
+echo "  # To restrict a route to an internal /24 subnet:"
+echo "  #"
+echo "  # \"ipFilter\": { \"allow\": [\"10.0.1.0/24\"] }"
+echo "  #"
+echo "  # To block an entire class-A range:"
+echo "  #"
+echo "  # \"ipFilter\": { \"deny\": [\"203.0.113.0/24\"] }  ← TEST-NET-3 (RFC 5737)"
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+echo "  Press Ctrl+C to stop all services."
+echo ""
+
+wait "$GATEWAY_PID"

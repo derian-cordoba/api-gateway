@@ -1,0 +1,10 @@
+[
+  {
+    "baseURL": "/inventory",
+    "proxy": {
+      "target": "http://localhost:4007",
+      "changeOrigin": true,
+      "pathRewrite": { "^/inventory": "" }
+    }
+  }
+]

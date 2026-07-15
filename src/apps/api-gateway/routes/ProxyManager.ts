@@ -9,6 +9,7 @@ import type { Gateway } from "../types/gateway";
 import type { RateLimit } from "../types/rate-limit";
 import { validateRoutes } from "./RouteValidator";
 import { createAuthMiddleware } from "../middleware/authMiddleware";
+import { createIpFilterMiddleware } from "../middleware/ipFilter";
 import { CircuitBreaker } from "../middleware/circuit-breaker/CircuitBreaker";
 import { CircuitBreakerProxyHandlers } from "../middleware/circuit-breaker/CircuitBreakerProxyHandlers";
 import { logger } from "../logger";
@@ -37,6 +38,10 @@ export class ProxyManager {
   }
 
   private registerRoute(route: Gateway): void {
+    if (route.ipFilter) {
+      this.router.use(route.baseURL, createIpFilterMiddleware(route.ipFilter));
+    }
+
     if (route.auth) {
       this.router.use(route.baseURL, createAuthMiddleware(route.auth));
     }

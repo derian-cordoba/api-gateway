@@ -1,6 +1,6 @@
 # API Gateway
 
-A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route rate limiting, authentication, circuit breaking, structured logging, and full security headers out of the box.
+A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, structured logging, and full security headers out of the box.
 
 ---
 
@@ -16,6 +16,8 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
   - [JWT](#jwt)
   - [API Key](#api-key)
 - [Circuit Breaker](#circuit-breaker)
+- [Request ID Propagation](#request-id-propagation)
+- [IP Allowlist / Blocklist](#ip-allowlist--blocklist)
 - [Running the Gateway](#running-the-gateway)
 - [Health Check](#health-check)
 - [Project Structure](#project-structure)
@@ -30,6 +32,8 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC) or an API key; set `enabled: false` to bypass with zero overhead
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
+- **Request ID propagation** — every request receives a `X-Request-ID` header (generated UUID v4 if absent, forwarded unchanged if already set); the same ID appears in the response header, every gateway log line, and the request forwarded to the upstream — enabling end-to-end request tracing with no external infrastructure
+- **IP allowlist / blocklist** — per-route IPv4 and CIDR-range filtering; deny list is evaluated first, allow list restricts access to specified addresses only; IPv4-mapped IPv6 addresses are normalised automatically
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
 - **Security headers** — full `helmet` defaults applied to every response (`CSP`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`, etc.)
@@ -124,6 +128,7 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
   rateLimit?:      RateLimit      // optional — per-route rate limiting
   auth?:           Auth           // optional — per-route authentication
   circuitBreaker?: CircuitBreaker // optional — per-route circuit breaker
+  ipFilter?:       IpFilter       // optional — per-route IP allowlist / blocklist
 }
 ```
 
@@ -185,6 +190,17 @@ Stops forwarding requests to a failing upstream after a configurable number of c
 | `timeout` | `number` | ✅ | Milliseconds the circuit stays open before transitioning to half-open and sending a probe request. |
 | `successThreshold` | `number` | — | Consecutive probe successes required to close the circuit (default: `1`). |
 
+#### `IpFilter`
+
+Restricts access to a route based on the client's IP address. At least one of `allow` or `deny` must be provided. See [IP Allowlist / Blocklist](#ip-allowlist--blocklist) for a full explanation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `allow` | `string[]` | — | IPv4 addresses or CIDR ranges that are explicitly allowed. When set, only listed IPs can access the route. At least one entry required. |
+| `deny` | `string[]` | — | IPv4 addresses or CIDR ranges that are explicitly blocked. Evaluated before `allow` — a match returns `403` immediately. At least one entry required. |
+
+Both fields accept plain IPv4 addresses (`192.168.1.1`) and CIDR notation (`10.0.0.0/8`). IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1`) are normalised to their IPv4 form before matching, so you never need to list both forms.
+
 #### Example `routes.json`
 
 ```json
@@ -239,6 +255,17 @@ Stops forwarding requests to a failing upstream after a configurable number of c
       "threshold": 5,
       "timeout": 30000,
       "successThreshold": 1
+    }
+  },
+  {
+    "baseURL": "/internal/metrics",
+    "proxy": {
+      "target": "http://metrics-service:3005",
+      "changeOrigin": true,
+      "pathRewrite": { "^/internal/metrics": "" }
+    },
+    "ipFilter": {
+      "allow": ["10.0.0.0/8", "172.16.0.0/12"]
     }
   }
 ]
@@ -433,6 +460,118 @@ Circuit breaking and rate limiting are independent and can be applied to the sam
 
 ---
 
+## Request ID Propagation
+
+Every request that passes through the gateway is assigned a unique `X-Request-ID` header. This ID ties together the gateway log line, the request forwarded to the upstream, and the response returned to the caller — letting you trace any individual request across your entire stack with a single value.
+
+### Behaviour
+
+| Scenario | Result |
+|---|---|
+| Client sends no `X-Request-ID` header | Gateway generates a UUID v4 and injects it |
+| Client sends `X-Request-ID: <value>` | Gateway forwards the existing value unchanged |
+
+In both cases the final ID is:
+- set on `req.headers` so it is forwarded to the upstream in the proxy request
+- echoed in the `X-Request-ID` **response** header so callers can log it
+- used as `req.id` in every `pino-http` log line for that request
+
+No route configuration is required — propagation is automatic for every route.
+
+### Gateway log correlation
+
+```
+INFO  incoming request  { "req": { "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "method": "GET", "url": "/orders" } }
+INFO  request completed { "req": { "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479" }, "res": { "statusCode": 200 } }
+```
+
+### Usage
+
+```bash
+# Gateway generates a UUID — echoed in the response header
+curl -si http://localhost:3000/inventory | grep -i x-request-id
+# X-Request-ID: f47ac10b-58cc-4372-a567-0e02b2c3d479
+
+# Supply your own ID — forwarded unchanged
+curl -si http://localhost:3000/inventory \
+  -H "X-Request-ID: my-trace-abc-123" | grep -i x-request-id
+# X-Request-ID: my-trace-abc-123
+```
+
+---
+
+## IP Allowlist / Blocklist
+
+Restrict access to any route by the client's IP address. Both exact IPv4 addresses and CIDR ranges are supported. `deny` and `allow` can be combined on the same route.
+
+### Evaluation order
+
+```
+1. deny  — if the client IP matches any deny entry → 403 Forbidden (stop)
+2. allow — if set and the client IP does not match any allow entry → 403 Forbidden (stop)
+3.        — request is forwarded to the upstream
+```
+
+When only `deny` is configured every IP passes except those explicitly blocked.  
+When only `allow` is configured only listed IPs pass.  
+When both are present `deny` takes precedence.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/internal/metrics",
+  "proxy": { "target": "http://metrics-service:3005", "changeOrigin": true },
+  "ipFilter": {
+    "allow": ["10.0.0.0/8", "172.16.0.0/12"]
+  }
+}
+```
+
+```json
+{
+  "baseURL": "/public-api",
+  "proxy": { "target": "http://api-service:3006", "changeOrigin": true },
+  "ipFilter": {
+    "deny": ["203.0.113.0/24"]
+  }
+}
+```
+
+### Response when blocked
+
+```
+HTTP/1.1 403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "Forbidden",
+  "message": "Your IP address is not permitted to access this resource"
+}
+```
+
+The upstream never receives the request — filtering happens in the gateway middleware before the proxy is invoked.
+
+### IPv6 normalisation
+
+IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1`) are silently normalised to their IPv4 form before matching. You only need to list the IPv4 address in the config — both forms are covered automatically.
+
+### Combining with other features
+
+IP filtering runs as the **first middleware** on a route, before authentication and rate limiting. A blocked request never reaches the auth check and does not count against rate limit counters.
+
+```json
+{
+  "baseURL": "/admin",
+  "proxy": { "target": "http://admin-service:3007", "changeOrigin": true },
+  "ipFilter": { "allow": ["10.0.0.0/8"] },
+  "auth": { "enabled": true, "strategy": "apiKey", "keys": ["admin-key-xyz"] },
+  "rateLimit": { "max": 50, "windowMs": 60000 }
+}
+```
+
+---
+
 ## Running the Gateway
 
 ### Development (hot-reload)
@@ -505,6 +644,8 @@ src/apps/api-gateway/
 │   └── auth/config.ts        # JWT_SECRET, JWT_PUBLIC_KEY
 │
 ├── middleware/
+│   ├── requestId.ts          # X-Request-ID generation and forwarding
+│   ├── ipFilter.ts           # Per-route IPv4 allowlist / blocklist
 │   ├── authMiddleware.ts     # Factory — returns the right strategy or a no-op
 │   ├── auth/
 │   │   ├── AuthStrategy.ts       # Interface (Strategy pattern)
@@ -524,6 +665,7 @@ src/apps/api-gateway/
 │       ├── rate-limit.schema.ts
 │       ├── auth.schema.ts
 │       ├── circuit-breaker.schema.ts
+│       ├── ip-filter.schema.ts
 │       └── gateway.schema.ts
 │
 └── types/
@@ -531,7 +673,8 @@ src/apps/api-gateway/
     ├── proxy.d.ts            # Proxy type
     ├── rate-limit.d.ts       # RateLimit type
     ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
-    └── circuit-breaker.d.ts  # CircuitBreakerConfig type
+    ├── circuit-breaker.d.ts  # CircuitBreakerConfig type
+    └── ip-filter.d.ts        # IpFilter type
 ```
 
 ---
@@ -557,6 +700,9 @@ Copies `examples/.env` to the project root and starts all services. Once running
 | `http://localhost:3000/orders` | JWT auth | Orders service |
 | `http://localhost:3000/reports` | API key auth | Reports service |
 | `http://localhost:3000/payments` | Circuit breaker | Payments service |
+| `http://localhost:3000/inventory` | Request ID | Inventory service — echoes the forwarded ID |
+| `http://localhost:3000/analytics/public` | — | Analytics service — open to all |
+| `http://localhost:3000/analytics/internal` | IP filter | Analytics service — allow: `127.0.0.1` |
 
 ### Public routes
 
@@ -590,6 +736,35 @@ curl -X POST http://localhost:3000/orders \
 # Valid keys: key-service-alpha-123  ·  key-service-beta-456
 curl http://localhost:3000/reports \
   -H "x-api-key: key-service-alpha-123"
+```
+
+### Request ID propagation route (`/inventory`)
+
+```bash
+# Gateway generates a UUID — echoed in response header and JSON body
+curl -si http://localhost:3000/inventory | grep -i x-request-id
+
+# Supply your own correlation ID — forwarded unchanged to the upstream
+curl -si http://localhost:3000/inventory \
+  -H "X-Request-ID: my-trace-abc-123"
+
+# Confirm the upstream received the same ID — visible in its stdout and the JSON body
+curl -s http://localhost:3000/inventory/1 | jq '._requestId'
+```
+
+### IP filter routes (`/analytics/*`)
+
+```bash
+# Public — no restrictions
+curl -s http://localhost:3000/analytics/public | jq
+
+# Internal — allow: 127.0.0.1 — passes from loopback
+curl -s http://localhost:3000/analytics/internal | jq
+
+# To observe a block, call the dedicated IP filter example which includes a
+# deny route that always returns 403 from loopback:
+#   bash examples/ip-filter/run.sh
+#   curl -s http://localhost:3000/analytics/blocked | jq
 ```
 
 ### Circuit breaker route (`/payments`)
@@ -633,6 +808,8 @@ Each sub-directory is also a standalone reference:
 | `examples/jwt-auth/` | JWT authentication — Auth + Orders services |
 | `examples/api-key-auth/` | API key authentication — Reports service |
 | `examples/circuit-breaker/` | Circuit breaker — Payments service with runtime mode toggling |
+| `examples/request-id/` | Request ID propagation — Inventory service that echoes the forwarded ID end-to-end |
+| `examples/ip-filter/` | IP allowlist / blocklist — Analytics service with three routes (open / allow / deny) |
 
 ---
 
@@ -646,7 +823,8 @@ Client
   ▼
 Express app
   │
-  ├─ pino-http              structured request/response logging
+  ├─ requestId              inject / forward X-Request-ID header
+  ├─ pino-http              structured request/response logging (req.id = X-Request-ID)
   ├─ helmet                 security headers (CSP, HSTS, X-Frame-Options, …)
   ├─ cors                   configurable origin / method / header policy
   ├─ express.json           body parsing
@@ -654,6 +832,7 @@ Express app
   │
   ├─ GET /health            health check — short-circuits here
   │
+  ├─ ipFilter               per-route — IP allow/deny check → 403 on block
   ├─ authMiddleware         per-route — JWT or API key check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
