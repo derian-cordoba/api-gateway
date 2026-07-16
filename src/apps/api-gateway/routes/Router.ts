@@ -10,7 +10,7 @@ import cors from "cors";
 import compress from "compression";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
-import { ProxyManager } from "./ProxyManager";
+import { RouteReloader } from "./RouteReloader";
 import { createHealthRouter } from "./HealthRouter";
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
@@ -18,6 +18,7 @@ import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requ
 
 export class Router {
   private readonly router: ExpressRouter;
+  private reloader: RouteReloader | null = null;
 
   constructor() {
     this.router = ExpressRouter();
@@ -53,11 +54,20 @@ export class Router {
     // Health check
     this.router.use(createHealthRouter());
 
-    // Proxy routes (async — reads config file / env var)
-    await this.configureProxyManager(httpServer);
+    // Hot-reloadable proxy routes
+    this.reloader = new RouteReloader(httpServer);
+    await this.reloader.start();
+    this.router.use(this.reloader.getDelegatorMiddleware());
 
     // Error handler must be registered last
     this.configureErrorHandler();
+  }
+
+  /**
+   * Stop the file watcher and remove the SIGHUP reload listener.
+   */
+  stop(): void {
+    this.reloader?.stop();
   }
 
   private configureCors(): void {
@@ -75,11 +85,6 @@ export class Router {
     this.router.use(express.json());
     this.router.use(express.urlencoded({ extended: true }));
     this.router.use(compress());
-  }
-
-  private async configureProxyManager(httpServer?: HttpServer): Promise<void> {
-    const proxyManager = new ProxyManager(this.router, httpServer);
-    await proxyManager.registerProxyRoutes();
   }
 
   private configureErrorHandler(): void {

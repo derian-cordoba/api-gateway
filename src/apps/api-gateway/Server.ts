@@ -54,6 +54,8 @@ export class Server {
    * Stop the HTTP server gracefully
    */
   async stop(): Promise<void> {
+    this.router.stop();
+
     return new Promise((resolve: (value: void | PromiseLike<void>) => void) => {
       this.httpServer.close((error: Error | undefined) => {
         if (error) {

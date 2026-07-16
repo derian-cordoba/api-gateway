@@ -1,6 +1,7 @@
 import type { Router, Request, Response, NextFunction, RequestHandler } from "express";
 import type { Options } from "http-proxy-middleware";
-import type { Server as HttpServer } from "node:http";
+import type { IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 
 import rateLimit from "express-rate-limit";
@@ -17,29 +18,46 @@ import { LoadBalancer } from "../middleware/load-balancer/LoadBalancer";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 
-type ProxyOnHandlers = NonNullable<Options["on"]>;
+export type ProxyOnHandlers = NonNullable<Options["on"]>;
+export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
 export class ProxyManager {
   private readonly router: Router;
   private readonly filePath: string;
 
-  constructor(router: Router, private readonly httpServer?: HttpServer) {
+  constructor(router: Router) {
     this.router = router;
     this.filePath = appEnv.routes.filePath;
   }
 
-  async registerProxyRoutes(): Promise<void> {
+  /**
+   * Build a fully-configured router and collect any WebSocket upgrade handlers.
+   * Called on every reload — each invocation is independent with no shared state.
+   */
+  static async build(router: Router): Promise<{ router: Router; wsHandlers: WsUpgradeHandler[] }> {
+    const manager = new ProxyManager(router);
+    const wsHandlers = await manager.registerProxyRoutes();
+    return { router, wsHandlers };
+  }
+
+  async registerProxyRoutes(): Promise<WsUpgradeHandler[]> {
     const routes = await this.readRoutes();
+    const wsHandlers: WsUpgradeHandler[] = [];
 
     if (routes.length === 0) {
       logger.warn("No proxy routes configured");
-      return;
+      return wsHandlers;
     }
 
-    routes.forEach((route) => this.registerRoute(route));
+    routes.forEach((route) => {
+      const handler = this.registerRoute(route);
+      if (handler) wsHandlers.push(handler);
+    });
+
+    return wsHandlers;
   }
 
-  private registerRoute(route: Gateway): void {
+  private registerRoute(route: Gateway): WsUpgradeHandler | null {
     if (route.ipFilter) {
       this.router.use(route.baseURL, createIpFilterMiddleware(route.ipFilter));
     }
@@ -68,12 +86,6 @@ export class ProxyManager {
 
     this.router.use(route.baseURL, proxyMiddleware);
 
-    if (route.proxy.ws && this.httpServer) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.httpServer.on("upgrade", (proxyMiddleware as any).upgrade);
-      logger.info({ baseURL: route.baseURL }, "WebSocket upgrade handler registered");
-    }
-
     logger.info(
       {
         baseURL: route.baseURL,
@@ -84,6 +96,14 @@ export class ProxyManager {
       },
       "Registered proxy route",
     );
+
+    if (route.proxy.ws) {
+      logger.info({ baseURL: route.baseURL }, "WebSocket upgrade handler registered");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (proxyMiddleware as any).upgrade as WsUpgradeHandler;
+    }
+
+    return null;
   }
 
   private buildRateLimitMiddleware(config: RateLimit): RequestHandler {
@@ -181,8 +201,8 @@ export class ProxyManager {
         logger.debug({ filePath: this.filePath }, "Routes file not found, skipping");
         return [];
       }
-      logger.error({ err: error, filePath: this.filePath }, "Failed to read routes file");
-      return [];
+      // Re-throw so callers (e.g. RouteReloader) can catch and keep the last good config
+      throw error;
     }
   }
 
