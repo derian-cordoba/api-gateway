@@ -12,6 +12,8 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { RouteReloader } from "./RouteReloader";
 import { createHealthRouter } from "./HealthRouter";
+import { createMetricsRouter } from "./MetricsRouter";
+import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requestId";
@@ -53,6 +55,9 @@ export class Router {
 
     // Health check
     this.router.use(createHealthRouter());
+
+    // Prometheus metrics endpoint
+    this.router.use(createMetricsRouter(metricsCollector));
 
     // Hot-reloadable proxy routes
     this.reloader = new RouteReloader(httpServer);

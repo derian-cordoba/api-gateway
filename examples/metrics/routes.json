@@ -1,0 +1,14 @@
+[
+  {
+    "baseURL": "/orders",
+    "proxy": {
+      "target": "http://localhost:4030",
+      "changeOrigin": true,
+      "pathRewrite": { "^/orders": "" }
+    },
+    "cache": {
+      "ttl": 10000,
+      "methods": ["GET"]
+    }
+  }
+]

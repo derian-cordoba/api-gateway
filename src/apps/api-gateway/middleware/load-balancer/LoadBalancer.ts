@@ -37,15 +37,25 @@ export class LoadBalancer {
 
   createRouterFn(): (req: object) => string {
     return (req: object): string => {
-      const url = this.pick();
-      this.reqTarget.set(req, url);
-
-      if (this.strategy === "least-connections") {
-        this.connectionCount.set(url, (this.connectionCount.get(url) ?? 0) + 1);
-      }
-
-      return url;
+      return this.selectTarget(req);
     };
+  }
+
+  /**
+   * Select the next upstream target for the given request object and track the
+   * association so `onConnectionClosed` can decrement the connection count later.
+   * Suitable for use by custom middleware (e.g. retry proxy) that needs to pick
+   * a target independently of http-proxy-middleware's `router` option.
+   */
+  selectTarget(req: object): string {
+    const url = this.pick();
+    this.reqTarget.set(req, url);
+
+    if (this.strategy === "least-connections") {
+      this.connectionCount.set(url, (this.connectionCount.get(url) ?? 0) + 1);
+    }
+
+    return url;
   }
 
   onConnectionClosed(req: object): void {

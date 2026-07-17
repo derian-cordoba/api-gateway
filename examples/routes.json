@@ -122,5 +122,43 @@
       "pathRewrite": { "^/chat": "" },
       "ws": true
     }
+  },
+  {
+    "baseURL": "/retry-inventory",
+    "proxy": {
+      "target": "http://localhost:4040",
+      "changeOrigin": true,
+      "pathRewrite": { "^/retry-inventory": "" }
+    },
+    "retry": {
+      "attempts": 3,
+      "delay": 200,
+      "backoff": "exponential"
+    }
+  },
+  {
+    "baseURL": "/cached-catalog",
+    "proxy": {
+      "target": "http://localhost:4050",
+      "changeOrigin": true,
+      "pathRewrite": { "^/cached-catalog": "" }
+    },
+    "cache": {
+      "ttl": 30000,
+      "methods": ["GET", "HEAD"],
+      "statusCodes": [200]
+    }
+  },
+  {
+    "baseURL": "/metrics-orders",
+    "proxy": {
+      "target": "http://localhost:4030",
+      "changeOrigin": true,
+      "pathRewrite": { "^/metrics-orders": "" }
+    },
+    "cache": {
+      "ttl": 10000,
+      "methods": ["GET"]
+    }
   }
 ]

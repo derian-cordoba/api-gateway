@@ -16,6 +16,11 @@ import { createTimeoutMiddleware } from "../middleware/timeout";
 import { CircuitBreaker } from "../middleware/circuit-breaker/CircuitBreaker";
 import { CircuitBreakerProxyHandlers } from "../middleware/circuit-breaker/CircuitBreakerProxyHandlers";
 import { LoadBalancer } from "../middleware/load-balancer/LoadBalancer";
+import { createRetryProxyMiddleware } from "../middleware/retry/RetryProxyMiddleware";
+import { ResponseCache } from "../middleware/cache/ResponseCache";
+import { createCacheMiddleware } from "../middleware/cache/createCacheMiddleware";
+import { metricsCollector } from "../middleware/metrics/MetricsCollector";
+import { createMetricsMiddleware } from "../middleware/metrics/createMetricsMiddleware";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 
@@ -79,9 +84,16 @@ export class ProxyManager {
       this.router.use(route.baseURL, this.buildCircuitBreakerGuard(breaker));
     }
 
-    // Register timeout middleware before the proxy so it can send 504 if the
-    // upstream is slow. The timer is cleared automatically when the response
-    // finishes normally.
+    // Metrics — records request counts, latency, errors, and cache hits
+    this.router.use(route.baseURL, createMetricsMiddleware(route.baseURL, metricsCollector));
+
+    // Cache — serves HIT responses immediately, intercepts upstream on MISS
+    if (route.cache) {
+      const cache = new ResponseCache(route.cache);
+      this.router.use(route.baseURL, createCacheMiddleware(cache));
+    }
+
+    // Timeout — sends 504 if the upstream does not respond within the window
     if (route.proxy.timeout) {
       this.router.use(route.baseURL, createTimeoutMiddleware(route.proxy.timeout));
     }
@@ -89,6 +101,32 @@ export class ProxyManager {
     const balancer = route.proxy.targets
       ? new LoadBalancer(route.proxy.targets, route.proxy.strategy ?? "round-robin")
       : null;
+
+    // Routes with retry config use a custom Node http/https proxy instead of
+    // http-proxy-middleware so that we can buffer and retry on 5xx.
+    if (route.retry) {
+      const retryMiddleware = createRetryProxyMiddleware(
+        route.retry,
+        route.proxy.target,
+        route.proxy.pathRewrite as Record<string, string> | undefined,
+        balancer,
+        breaker,
+      );
+      this.router.use(route.baseURL, retryMiddleware);
+
+      logger.info(
+        {
+          baseURL: route.baseURL,
+          targets: route.proxy.targets?.map((target) => target.url) ?? [route.proxy.target!],
+          retry: route.retry,
+          circuitBreaker: !!breaker,
+          timeout: route.proxy.timeout,
+        },
+        "Registered proxy route (retry enabled)",
+      );
+
+      return null; // WS not supported with retry middleware
+    }
 
     const proxyMiddleware = createProxyMiddleware(this.buildProxyOptions(route, breaker, balancer));
 
@@ -102,6 +140,7 @@ export class ProxyManager {
         circuitBreaker: !!breaker,
         timeout: route.proxy.timeout,
         ws: !!route.proxy.ws,
+        cache: !!route.cache,
       },
       "Registered proxy route",
     );
