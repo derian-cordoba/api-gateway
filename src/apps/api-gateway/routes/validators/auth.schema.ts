@@ -15,4 +15,22 @@ const ApiKeyAuthSchema = z.object({
   keys: z.array(z.string()).min(1, "apiKey auth requires at least one key"),
 });
 
-export const AuthSchema = z.discriminatedUnion("strategy", [JwtAuthSchema, ApiKeyAuthSchema]);
+const BasicAuthCredentialSchema = z.object({
+  username: z.string().min(1, "username must not be empty"),
+  password: z.string().min(1, "password must not be empty"),
+});
+
+const BasicAuthSchema = z.object({
+  enabled: z.boolean(),
+  strategy: z.literal("basicAuth"),
+  credentials: z
+    .array(BasicAuthCredentialSchema)
+    .min(1, "basicAuth requires at least one credential"),
+  realm: z.string().optional(),
+});
+
+export const AuthSchema = z.discriminatedUnion("strategy", [
+  JwtAuthSchema,
+  ApiKeyAuthSchema,
+  BasicAuthSchema,
+]);

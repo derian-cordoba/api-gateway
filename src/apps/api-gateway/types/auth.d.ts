@@ -34,4 +34,19 @@ export declare type ApiKeyAuth = {
   keys: string[];
 };
 
-export declare type Auth = JwtAuth | ApiKeyAuth;
+export declare type BasicAuth = {
+  enabled: boolean;
+  strategy: "basicAuth";
+  /**
+   * List of valid username/password pairs.
+   * Credentials are compared using a timing-safe algorithm.
+   */
+  credentials: Array<{ username: string; password: string }>;
+  /**
+   * The realm string included in the WWW-Authenticate response header.
+   * Defaults to "API Gateway".
+   */
+  realm?: string;
+};
+
+export declare type Auth = JwtAuth | ApiKeyAuth | BasicAuth;

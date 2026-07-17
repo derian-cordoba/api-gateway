@@ -59,6 +59,19 @@ describe("Auth middleware — integration", () => {
         proxy: { target, changeOrigin: true, pathRewrite: { "^/unprotected": "" } },
         auth: { enabled: false, strategy: "jwt" },
       },
+      {
+        baseURL: "/protected-basic",
+        proxy: { target, changeOrigin: true, pathRewrite: { "^/protected-basic": "" } },
+        auth: {
+          enabled: true,
+          strategy: "basicAuth",
+          credentials: [
+            { username: "alice", password: "s3cr3t" },
+            { username: "bob", password: "hunter2" },
+          ],
+          realm: "Test Realm",
+        },
+      },
     ]);
 
     const gateway = new Server();
@@ -154,6 +167,61 @@ describe("Auth middleware — integration", () => {
       const res = await request.get("/unprotected");
       expect(res.status).toBe(200);
       expect(res.body.proxied).toBe(true);
+    });
+  });
+
+  // MARK: Basic Auth
+
+  describe("Basic Auth route (/protected-basic)", () => {
+    function basicHeader(username: string, password: string): string {
+      return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    }
+
+    it("returns 401 when Authorization header is absent", async () => {
+      const res = await request.get("/protected-basic");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns WWW-Authenticate header with the configured realm on 401", async () => {
+      const res = await request.get("/protected-basic");
+      expect(res.headers["www-authenticate"]).toBe('Basic realm="Test Realm"');
+    });
+
+    it("proxies the request with valid credentials for alice", async () => {
+      const res = await request
+        .get("/protected-basic")
+        .set("Authorization", basicHeader("alice", "s3cr3t"));
+      expect(res.status).toBe(200);
+      expect(res.body.proxied).toBe(true);
+    });
+
+    it("proxies the request with valid credentials for bob", async () => {
+      const res = await request
+        .get("/protected-basic")
+        .set("Authorization", basicHeader("bob", "hunter2"));
+      expect(res.status).toBe(200);
+      expect(res.body.proxied).toBe(true);
+    });
+
+    it("returns 401 with a wrong password", async () => {
+      const res = await request
+        .get("/protected-basic")
+        .set("Authorization", basicHeader("alice", "wrongpassword"));
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 with an unknown username", async () => {
+      const res = await request
+        .get("/protected-basic")
+        .set("Authorization", basicHeader("eve", "s3cr3t"));
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 401 when Bearer scheme is used instead of Basic", async () => {
+      const res = await request
+        .get("/protected-basic")
+        .set("Authorization", "Bearer sometoken");
+      expect(res.status).toBe(401);
     });
   });
 });

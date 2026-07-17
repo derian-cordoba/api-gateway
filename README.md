@@ -1,6 +1,6 @@
 # API Gateway
 
-A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route load balancing, rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, WebSocket proxying, structured logging, and full security headers out of the box.
+A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route load balancing, rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, request timeouts, WebSocket proxying, structured logging, and full security headers out of the box.
 
 ---
 
@@ -15,6 +15,8 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - [Authentication](#authentication)
   - [JWT](#jwt)
   - [API Key](#api-key)
+  - [Basic Auth](#basic-auth)
+- [Request Timeout per Route](#request-timeout-per-route)
 - [Circuit Breaker](#circuit-breaker)
 - [Load Balancing](#load-balancing)
 - [WebSocket Proxying](#websocket-proxying)
@@ -31,12 +33,13 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 ## Features
 
 - **Configuration-driven routing** — define proxy routes in a JSON file, an environment variable, or both; changes take effect on restart with zero code changes
-- **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC) or an API key; set `enabled: false` to bypass with zero overhead
+- **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC), an API key, or HTTP Basic Auth; set `enabled: false` to bypass with zero overhead
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
 - **Request ID propagation** — every request receives a `X-Request-ID` header (generated UUID v4 if absent, forwarded unchanged if already set); the same ID appears in the response header, every gateway log line, and the request forwarded to the upstream — enabling end-to-end request tracing with no external infrastructure
 - **IP allowlist / blocklist** — per-route IPv4 and CIDR-range filtering; deny list is evaluated first, allow list restricts access to specified addresses only; IPv4-mapped IPv6 addresses are normalised automatically
 - **Load balancing** — distribute traffic across multiple upstream targets with three strategies: `round-robin` (default), `weighted` (proportional weight per target), and `least-connections` (always forwards to the least-busy upstream); fully composable with auth, rate limiting, and the circuit breaker
+- **Per-route request timeout** — set `proxy.timeout` on any route to cap how long the gateway waits for an upstream response; slow upstreams receive a `504 Gateway Timeout` and the upstream connection is aborted
 - **WebSocket proxying** — enable `ws: true` on any route to proxy WebSocket upgrade requests transparently; all subsequent frames are tunnelled to the upstream without additional configuration
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
@@ -151,7 +154,7 @@ Exactly one of `target` or `targets` must be provided.
 | `headers` | `{ [name]: value }` | — | Extra headers added to every forwarded request. |
 | `isSecure` | `boolean` | — | Verify the upstream TLS certificate. |
 | `method` | `string` | — | Override the HTTP method forwarded to the upstream. |
-| `timeout` | `number` | — | Proxy request timeout in milliseconds. |
+| `timeout` | `number` | — | Maximum milliseconds to wait for an upstream response. Exceeding this limit returns `504 Gateway Timeout` and aborts the upstream connection. |
 
 **`WeightedTarget`**
 
@@ -175,7 +178,7 @@ Responses include standard `RateLimit-*` headers (RFC draft-8).
 
 Adds authentication middleware to a route. When `enabled` is `false` the middleware is a no-op passthrough — no overhead, no token check.
 
-Two strategies are supported, selected with the `strategy` field.
+Three strategies are supported, selected with the `strategy` field.
 
 **`"jwt"` — Bearer token validation**
 
@@ -195,6 +198,15 @@ Two strategies are supported, selected with the `strategy` field.
 | `strategy` | `"apiKey"` | ✅ | — |
 | `keys` | `string[]` | ✅ | List of valid API keys. At least one entry required. |
 | `header` | `string` | — | Header name to read the key from (default: `x-api-key`). |
+
+**`"basicAuth"` — HTTP Basic Authentication**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | ✅ | `true` to enforce, `false` to bypass. |
+| `strategy` | `"basicAuth"` | ✅ | — |
+| `credentials` | `{ username: string; password: string }[]` | ✅ | List of valid username/password pairs. At least one entry required. Credentials are compared using a timing-safe algorithm. |
+| `realm` | `string` | — | Value for the `WWW-Authenticate` response header (default: `"API Gateway"`). |
 
 #### `CircuitBreaker`
 
@@ -303,6 +315,31 @@ Both fields accept plain IPv4 addresses (`192.168.1.1`) and CIDR notation (`10.0
       "changeOrigin": true,
       "ws": true
     }
+  },
+  {
+    "baseURL": "/admin",
+    "proxy": {
+      "target": "http://admin-service:3009",
+      "changeOrigin": true,
+      "pathRewrite": { "^/admin": "" }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "basicAuth",
+      "credentials": [
+        { "username": "alice", "password": "s3cr3t" }
+      ],
+      "realm": "Admin Panel"
+    }
+  },
+  {
+    "baseURL": "/external",
+    "proxy": {
+      "target": "http://third-party-api:443",
+      "changeOrigin": true,
+      "pathRewrite": { "^/external": "" },
+      "timeout": 5000
+    }
   }
 ]
 ```
@@ -400,6 +437,104 @@ curl http://localhost:3000/reports
 ```
 
 Multiple keys in `keys` let you rotate credentials without downtime — add the new key, deploy, then remove the old one.
+
+### Basic Auth
+
+Protect a route with HTTP Basic Authentication. The gateway decodes the `Authorization: Basic <base64>` header, checks the username/password pair against the configured list, and returns `401` with a `WWW-Authenticate` header if the credentials are missing or wrong. Credential comparison is timing-safe to prevent enumeration attacks.
+
+```json
+{
+  "baseURL": "/admin",
+  "proxy": { "target": "http://admin-service:3010", "changeOrigin": true },
+  "auth": {
+    "enabled": true,
+    "strategy": "basicAuth",
+    "credentials": [
+      { "username": "alice", "password": "s3cr3t" },
+      { "username": "deploy-bot", "password": "ci-token-xyz" }
+    ],
+    "realm": "Admin Panel"
+  }
+}
+```
+
+```bash
+# Valid credentials → 200
+curl http://localhost:3000/admin \
+  -u alice:s3cr3t
+
+# Wrong password → 401 + WWW-Authenticate header
+curl -si http://localhost:3000/admin \
+  -u alice:wrongpassword | head -3
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Basic realm="Admin Panel"
+
+# No credentials → 401
+curl -si http://localhost:3000/admin | head -3
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Basic realm="Admin Panel"
+```
+
+> **Note:** HTTP Basic Auth transmits credentials in Base64, which is trivially reversible. Always use it behind TLS in production (`HTTPS`).
+
+Multiple credential pairs in `credentials` let you issue per-client credentials and revoke them individually without changing every consumer.
+
+---
+
+## Request Timeout per Route
+
+Set `proxy.timeout` on any route to limit how long the gateway waits for the upstream to respond. When the deadline is exceeded, the gateway immediately returns `504 Gateway Timeout` to the client and cancels the upstream connection — preventing a slow or hung upstream from holding sockets open indefinitely.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/external-api",
+  "proxy": {
+    "target": "http://slow-third-party:8080",
+    "changeOrigin": true,
+    "pathRewrite": { "^/external-api": "" },
+    "timeout": 5000
+  }
+}
+```
+
+`timeout` is measured in milliseconds and applies to the total time waiting for the upstream to begin sending a response. Once the upstream starts streaming, the timer is cleared.
+
+### Response when timeout is exceeded
+
+```
+HTTP/1.1 504 Gateway Timeout
+Content-Type: application/json
+
+{
+  "error": "Gateway Timeout",
+  "message": "Upstream did not respond within 5000ms"
+}
+```
+
+The upstream connection is also aborted server-side, so resources are freed immediately.
+
+### Combining with the circuit breaker
+
+Timeout and circuit breaking work independently and can be applied to the same route:
+
+```json
+{
+  "baseURL": "/payments",
+  "proxy": {
+    "target": "http://payments-service:3004",
+    "changeOrigin": true,
+    "timeout": 3000
+  },
+  "circuitBreaker": {
+    "threshold": 5,
+    "timeout": 30000
+  }
+}
+```
+
+A request that times out counts as a circuit-breaker failure. After `threshold` timeouts the circuit opens and subsequent requests are rejected with `503` without even reaching the upstream.
 
 ---
 
@@ -820,11 +955,13 @@ src/apps/api-gateway/
 ├── middleware/
 │   ├── requestId.ts          # X-Request-ID generation and forwarding
 │   ├── ipFilter.ts           # Per-route IPv4 allowlist / blocklist
+│   ├── timeout.ts            # Per-route 504 timeout middleware
 │   ├── authMiddleware.ts     # Factory — returns the right strategy or a no-op
 │   ├── auth/
-│   │   ├── AuthStrategy.ts       # Interface (Strategy pattern)
-│   │   ├── JwtAuthStrategy.ts    # JWT Bearer token validation (HMAC + RSA/EC)
-│   │   └── ApiKeyAuthStrategy.ts # Header-based API key validation
+│   │   ├── AuthStrategy.ts        # Interface (Strategy pattern)
+│   │   ├── JwtAuthStrategy.ts     # JWT Bearer token validation (HMAC + RSA/EC)
+│   │   ├── ApiKeyAuthStrategy.ts  # Header-based API key validation
+│   │   └── BasicAuthStrategy.ts   # HTTP Basic Auth with timing-safe credential check
 │   ├── circuit-breaker/
 │   │   ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
 │   │   └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
@@ -846,9 +983,9 @@ src/apps/api-gateway/
 │
 └── types/
     ├── gateway.d.ts          # Gateway type
-    ├── proxy.d.ts            # Proxy type (single target or load-balanced targets)
+    ├── proxy.d.ts            # Proxy type (single target or load-balanced targets; timeout)
     ├── rate-limit.d.ts       # RateLimit type
-    ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth)
+    ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth | BasicAuth)
     ├── circuit-breaker.d.ts  # CircuitBreakerConfig type
     ├── ip-filter.d.ts        # IpFilter type
     └── load-balancer.d.ts    # WeightedTarget, BalancerStrategy types
@@ -1049,9 +1186,10 @@ Express app / raw HTTP server
   ├─ GET /health            health check — short-circuits here
   │
   ├─ ipFilter               per-route — IP allow/deny check → 403 on block
-  ├─ authMiddleware         per-route — JWT or API key check → 401 on failure
+  ├─ authMiddleware         per-route — JWT, API key, or Basic Auth check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
+  ├─ timeout middleware     per-route — sends 504 if upstream doesn't respond in time
   ├─ http-proxy-middleware  proxies request to upstream; load balancer selects target
   │    ├─ router()          load balancer pick (round-robin / weighted / least-connections)
   │    ├─ proxyReq          fix request body; open connection (least-connections)

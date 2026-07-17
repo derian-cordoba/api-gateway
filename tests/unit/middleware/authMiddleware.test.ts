@@ -28,7 +28,8 @@ function makeReq(overrides: Record<string, unknown> = {}): Record<string, unknow
 function makeRes() {
   const json = vi.fn();
   const status = vi.fn(() => ({ json }));
-  return { status, json: vi.fn(), _json: json };
+  const set = vi.fn();
+  return { status, json: vi.fn(), set, _json: json };
 }
 
 function makeNext() {
@@ -307,5 +308,147 @@ describe("API Key strategy", () => {
     );
     expect(res.status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// MARK: Basic Auth
+
+describe("Basic Auth strategy", () => {
+  const CREDENTIALS = [
+    { username: "alice", password: "s3cr3t" },
+    { username: "bob", password: "hunter2" },
+  ];
+
+  function basicHeader(username: string, password: string): string {
+    return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+  }
+
+  it("calls next() with valid credentials for the first user", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: basicHeader("alice", "s3cr3t") } }),
+      res,
+      next
+    );
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("calls next() with valid credentials for the second user", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: basicHeader("bob", "hunter2") } }),
+      res,
+      next
+    );
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("returns 401 when Authorization header is absent", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: {} }),
+      res,
+      next
+    );
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when scheme is Bearer instead of Basic", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: "Bearer sometoken" } }),
+      res,
+      next
+    );
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the password is wrong", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: basicHeader("alice", "wrong") } }),
+      res,
+      next
+    );
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the username is unknown", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: basicHeader("eve", "s3cr3t") } }),
+      res,
+      next
+    );
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the Base64 payload has no colon separator", () => {
+    const next = makeNext();
+    const res = makeRes();
+    const malformed = `Basic ${Buffer.from("nocolon").toString("base64")}`;
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: { authorization: malformed } }),
+      res,
+      next
+    );
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("sets WWW-Authenticate header with default realm on 401", () => {
+    const next = makeNext();
+    const res = makeRes();
+    const set = vi.fn();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS },
+      makeReq({ headers: {} }),
+      { ...res, set } as never,
+      next
+    );
+    expect(set).toHaveBeenCalledWith("WWW-Authenticate", 'Basic realm="API Gateway"');
+  });
+
+  it("uses a custom realm in WWW-Authenticate when configured", () => {
+    const next = makeNext();
+    const res = makeRes();
+    const set = vi.fn();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: CREDENTIALS, realm: "My Service" },
+      makeReq({ headers: {} }),
+      { ...res, set } as never,
+      next
+    );
+    expect(set).toHaveBeenCalledWith("WWW-Authenticate", 'Basic realm="My Service"');
+  });
+
+  it("handles a password that contains a colon correctly", () => {
+    const next = makeNext();
+    const res = makeRes();
+    runMiddleware(
+      { enabled: true, strategy: "basicAuth", credentials: [{ username: "carol", password: "pa:ss:word" }] },
+      makeReq({ headers: { authorization: basicHeader("carol", "pa:ss:word") } }),
+      res,
+      next
+    );
+    expect(next).toHaveBeenCalledOnce();
   });
 });

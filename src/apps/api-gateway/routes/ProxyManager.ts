@@ -12,6 +12,7 @@ import type { RateLimit } from "../types/rate-limit";
 import { validateRoutes } from "./RouteValidator";
 import { createAuthMiddleware } from "../middleware/authMiddleware";
 import { createIpFilterMiddleware } from "../middleware/ipFilter";
+import { createTimeoutMiddleware } from "../middleware/timeout";
 import { CircuitBreaker } from "../middleware/circuit-breaker/CircuitBreaker";
 import { CircuitBreakerProxyHandlers } from "../middleware/circuit-breaker/CircuitBreakerProxyHandlers";
 import { LoadBalancer } from "../middleware/load-balancer/LoadBalancer";
@@ -78,6 +79,13 @@ export class ProxyManager {
       this.router.use(route.baseURL, this.buildCircuitBreakerGuard(breaker));
     }
 
+    // Register timeout middleware before the proxy so it can send 504 if the
+    // upstream is slow. The timer is cleared automatically when the response
+    // finishes normally.
+    if (route.proxy.timeout) {
+      this.router.use(route.baseURL, createTimeoutMiddleware(route.proxy.timeout));
+    }
+
     const balancer = route.proxy.targets
       ? new LoadBalancer(route.proxy.targets, route.proxy.strategy ?? "round-robin")
       : null;
@@ -92,6 +100,7 @@ export class ProxyManager {
         targets: route.proxy.targets?.map((t) => t.url) ?? [route.proxy.target!],
         strategy: route.proxy.strategy ?? (route.proxy.targets ? "round-robin" : undefined),
         circuitBreaker: !!breaker,
+        timeout: route.proxy.timeout,
         ws: !!route.proxy.ws,
       },
       "Registered proxy route",
@@ -134,9 +143,10 @@ export class ProxyManager {
     breaker: CircuitBreaker | null,
     balancer: LoadBalancer | null,
   ): Options {
-    const { target, targets, strategy, ...proxyRest } = route.proxy;
+    // Extract fields handled outside of http-proxy-middleware so they don't
+    // get passed through as unknown proxy options.
+    const { target, targets, strategy, timeout, ...proxyRest } = route.proxy;
 
-    // Suppress unused variable warnings for destructured custom fields
     void targets;
     void strategy;
 
@@ -144,6 +154,13 @@ export class ProxyManager {
       ...proxyRest,
       on: this.buildProxyOnHandlers(breaker, balancer),
     };
+
+    // Use proxyTimeout (max wait for upstream response) rather than timeout
+    // (socket inactivity). The timeout middleware already handles sending 504;
+    // proxyTimeout ensures the upstream connection is also aborted.
+    if (timeout !== undefined) {
+      options.proxyTimeout = timeout;
+    }
 
     if (balancer) {
       options.router = balancer.createRouterFn();
@@ -177,6 +194,11 @@ export class ProxyManager {
       };
 
       handlers.error = (err, req, res) => {
+        // The timeout middleware may have already sent a 504; skip writing again.
+        if ((res as { headersSent?: boolean }).headersSent) {
+          balancer.onConnectionClosed(req);
+          return;
+        }
         if (prevError) prevError(err, req, res);
         balancer.onConnectionClosed(req);
       };
