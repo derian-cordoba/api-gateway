@@ -1,27 +1,22 @@
-import type { Router, Request, Response, NextFunction, RequestHandler } from "express";
-import type { Options } from "http-proxy-middleware";
-import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
+import type { Router } from "express";
+import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
-import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
-import { StatusCodes as HttpStatus } from "http-status-codes";
-import rateLimit from "express-rate-limit";
-import { readFile } from "node:fs/promises";
-import cors from "cors";
-import type { Gateway } from "../types/gateway";
-import type { RateLimit } from "../types/rate-limit";
-import type { HeadersConfig } from "../types/headers";
+import type { Options } from "http-proxy-middleware";
 import { validateRoutes } from "./RouteValidator";
-import { createAuthMiddleware } from "../middleware/authMiddleware";
-import { createIpFilterMiddleware } from "../middleware/ipFilter";
-import { createTimeoutMiddleware } from "../middleware/timeout";
-import { CircuitBreaker } from "../middleware/circuit-breaker/CircuitBreaker";
-import { CircuitBreakerProxyHandlers } from "../middleware/circuit-breaker/CircuitBreakerProxyHandlers";
-import { LoadBalancer } from "../middleware/load-balancer/LoadBalancer";
-import { createRetryProxyMiddleware } from "../middleware/retry/RetryProxyMiddleware";
-import { ResponseCache } from "../middleware/cache/ResponseCache";
-import { createCacheMiddleware } from "../middleware/cache/createCacheMiddleware";
+import { CompositeRouteSource } from "./route-sources/CompositeRouteSource";
+import { FileRouteSource } from "./route-sources/FileRouteSource";
+import { EnvRouteSource } from "./route-sources/EnvRouteSource";
+import { RouteRegistrar } from "./RouteRegistrar";
+import { CorsMiddlewareFactory } from "./middleware-factories/CorsMiddlewareFactory";
+import { IpFilterMiddlewareFactory } from "./middleware-factories/IpFilterMiddlewareFactory";
+import { AuthMiddlewareFactory } from "./middleware-factories/AuthMiddlewareFactory";
+import { RateLimitMiddlewareFactory } from "./middleware-factories/RateLimitMiddlewareFactory";
+import { CircuitBreakerMiddlewareFactory } from "./middleware-factories/CircuitBreakerMiddlewareFactory";
+import { MetricsMiddlewareFactory } from "./middleware-factories/MetricsMiddlewareFactory";
+import { CacheMiddlewareFactory } from "./middleware-factories/CacheMiddlewareFactory";
+import { TimeoutMiddlewareFactory } from "./middleware-factories/TimeoutMiddlewareFactory";
+import { ProxyBackendFactory } from "./proxy-backends/ProxyBackendFactory";
 import { metricsCollector } from "../middleware/metrics/MetricsCollector";
-import { createMetricsMiddleware } from "../middleware/metrics/createMetricsMiddleware";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 
@@ -29,12 +24,31 @@ export type ProxyOnHandlers = NonNullable<Options["on"]>;
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
 export class ProxyManager {
-  private readonly router: Router;
-  private readonly filePath: string;
+  private readonly sources: CompositeRouteSource;
+  private readonly registrar: RouteRegistrar;
 
   constructor(router: Router) {
-    this.router = router;
-    this.filePath = appEnv.routes.filePath;
+    const circuitBreakerFactory = new CircuitBreakerMiddlewareFactory();
+
+    this.sources = new CompositeRouteSource([
+      new FileRouteSource(appEnv.routes.filePath),
+      new EnvRouteSource(),
+    ]);
+
+    this.registrar = new RouteRegistrar(
+      router,
+      [
+        new CorsMiddlewareFactory(),
+        new IpFilterMiddlewareFactory(),
+        new AuthMiddlewareFactory(),
+        new RateLimitMiddlewareFactory(),
+        circuitBreakerFactory,
+        new MetricsMiddlewareFactory(metricsCollector),
+        new CacheMiddlewareFactory(),
+        new TimeoutMiddlewareFactory(),
+      ],
+      new ProxyBackendFactory(circuitBreakerFactory),
+    );
   }
 
   /**
@@ -48,287 +62,17 @@ export class ProxyManager {
   }
 
   async registerProxyRoutes(): Promise<WsUpgradeHandler[]> {
-    const routes = await this.readRoutes();
-    const wsHandlers: WsUpgradeHandler[] = [];
+    const raw = await this.sources.load();
+    const routes = validateRoutes(raw);
 
     if (routes.length === 0) {
       logger.warn("No proxy routes configured");
-      return wsHandlers;
-    }
-
-    routes.forEach((route) => {
-      const handler = this.registerRoute(route);
-      if (handler) wsHandlers.push(handler);
-    });
-
-    return wsHandlers;
-  }
-
-  private registerRoute(route: Gateway): WsUpgradeHandler | null {
-    // Per-route CORS — handles preflight (OPTIONS) and overrides global CORS headers.
-    // Mounted first so it runs before any access-control logic.
-    if (route.cors) {
-      this.router.use(route.baseURL, cors(route.cors));
-    }
-
-    if (route.ipFilter) {
-      this.router.use(route.baseURL, createIpFilterMiddleware(route.ipFilter));
-    }
-
-    if (route.auth) {
-      this.router.use(route.baseURL, createAuthMiddleware(route.auth));
-    }
-
-    if (route.rateLimit) {
-      this.router.use(route.baseURL, this.buildRateLimitMiddleware(route.rateLimit));
-    }
-
-    const breaker = route.circuitBreaker
-      ? new CircuitBreaker(route.circuitBreaker, route.baseURL)
-      : null;
-
-    if (breaker) {
-      this.router.use(route.baseURL, this.buildCircuitBreakerGuard(breaker));
-    }
-
-    // Metrics — records request counts, latency, errors, and cache hits
-    this.router.use(route.baseURL, createMetricsMiddleware(route.baseURL, metricsCollector));
-
-    // Cache — serves HIT responses immediately, intercepts upstream on MISS
-    if (route.cache) {
-      const cache = new ResponseCache(route.cache);
-      this.router.use(route.baseURL, createCacheMiddleware(cache));
-    }
-
-    // Timeout — sends 504 if the upstream does not respond within the window
-    if (route.proxy.timeout) {
-      this.router.use(route.baseURL, createTimeoutMiddleware(route.proxy.timeout));
-    }
-
-    const balancer = route.proxy.targets
-      ? new LoadBalancer(route.proxy.targets, route.proxy.strategy ?? "round-robin")
-      : null;
-
-    // Routes with retry config use a custom Node http/https proxy instead of
-    // http-proxy-middleware so that we can buffer and retry on 5xx.
-    if (route.retry) {
-      const retryMiddleware = createRetryProxyMiddleware(
-        route.retry,
-        route.proxy.target,
-        route.proxy.pathRewrite as Record<string, string> | undefined,
-        balancer,
-        breaker,
-        route.headers,
-      );
-      this.router.use(route.baseURL, retryMiddleware);
-
-      logger.info(
-        {
-          baseURL: route.baseURL,
-          targets: route.proxy.targets?.map((target) => target.url) ?? [route.proxy.target!],
-          retry: route.retry,
-          circuitBreaker: !!breaker,
-          timeout: route.proxy.timeout,
-        },
-        "Registered proxy route (retry enabled)",
-      );
-
-      return null; // WS not supported with retry middleware
-    }
-
-    const proxyMiddleware = createProxyMiddleware(
-      this.buildProxyOptions(route, breaker, balancer, route.headers),
-    );
-
-    this.router.use(route.baseURL, proxyMiddleware);
-
-    logger.info(
-      {
-        baseURL: route.baseURL,
-        targets: route.proxy.targets?.map((t) => t.url) ?? [route.proxy.target!],
-        strategy: route.proxy.strategy ?? (route.proxy.targets ? "round-robin" : undefined),
-        circuitBreaker: !!breaker,
-        timeout: route.proxy.timeout,
-        ws: !!route.proxy.ws,
-        cache: !!route.cache,
-      },
-      "Registered proxy route",
-    );
-
-    if (route.proxy.ws) {
-      logger.info({ baseURL: route.baseURL }, "WebSocket upgrade handler registered");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (proxyMiddleware as any).upgrade as WsUpgradeHandler;
-    }
-
-    return null;
-  }
-
-  private buildRateLimitMiddleware(config: RateLimit): RequestHandler {
-    return rateLimit({
-      windowMs: config.windowMs,
-      limit: config.max,
-      statusCode: config.statusCode ?? HttpStatus.TOO_MANY_REQUESTS,
-      message: config.message ?? "Too many requests",
-      standardHeaders: true,
-      legacyHeaders: false,
-    });
-  }
-
-  private buildCircuitBreakerGuard(breaker: CircuitBreaker): RequestHandler {
-    return (_req: Request, res: Response, next: NextFunction) => {
-      if (!breaker.shouldReject()) return next();
-
-      res.set("Retry-After", String(breaker.retryAfterSeconds()));
-      res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
-        error: "Service Unavailable",
-        message: "Circuit breaker open — upstream is not responding",
-      });
-    };
-  }
-
-  private buildProxyOptions(
-    route: Gateway,
-    breaker: CircuitBreaker | null,
-    balancer: LoadBalancer | null,
-    headers?: HeadersConfig,
-  ): Options {
-    // Extract fields handled outside of http-proxy-middleware so they don't
-    // get passed through as unknown proxy options.
-    const { target, targets, strategy, timeout, ...proxyRest } = route.proxy;
-
-    void targets;
-    void strategy;
-
-    const options: Options = {
-      ...proxyRest,
-      on: this.buildProxyOnHandlers(breaker, balancer, headers),
-    };
-
-    // Use proxyTimeout (max wait for upstream response) rather than timeout
-    // (socket inactivity). The timeout middleware already handles sending 504;
-    // proxyTimeout ensures the upstream connection is also aborted.
-    if (timeout !== undefined) {
-      options.proxyTimeout = timeout;
-    }
-
-    if (balancer) {
-      options.router = balancer.createRouterFn();
-    } else {
-      options.target = target;
-    }
-
-    return options;
-  }
-
-  private buildProxyOnHandlers(
-    breaker: CircuitBreaker | null,
-    balancer: LoadBalancer | null,
-    headers?: HeadersConfig,
-  ): ProxyOnHandlers {
-    // ── Request handler ──────────────────────────────────────────────────────
-    // Always run fixRequestBody first, then apply any request header transforms.
-    const reqTransform = headers?.request;
-    const proxyReqHandler = reqTransform
-      ? (proxyReq: ClientRequest, req: IncomingMessage, res: ServerResponse) => {
-          fixRequestBody(proxyReq, req as Parameters<typeof fixRequestBody>[1]);
-          void res;
-          if (reqTransform.set) {
-            for (const [key, val] of Object.entries(reqTransform.set)) {
-              proxyReq.setHeader(key, val);
-            }
-          }
-          if (reqTransform.remove) {
-            for (const key of reqTransform.remove) {
-              proxyReq.removeHeader(key);
-            }
-          }
-        }
-      : fixRequestBody;
-
-    const handlers: ProxyOnHandlers = { proxyReq: proxyReqHandler };
-
-    // ── Circuit breaker ───────────────────────────────────────────────────────
-    const cbHandlers = breaker ? new CircuitBreakerProxyHandlers(breaker).toOnHandlers() : null;
-
-    if (cbHandlers) {
-      handlers.proxyRes = cbHandlers.proxyRes;
-      handlers.error = cbHandlers.error;
-    }
-
-    // ── Load balancer ─────────────────────────────────────────────────────────
-    if (balancer) {
-      const prevProxyRes = handlers.proxyRes;
-      const prevError = handlers.error;
-
-      handlers.proxyRes = (proxyRes, req, res) => {
-        if (prevProxyRes) prevProxyRes(proxyRes, req, res);
-        balancer.onConnectionClosed(req);
-      };
-
-      handlers.error = (err, req, res) => {
-        // The timeout middleware may have already sent a 504; skip writing again.
-        if ((res as { headersSent?: boolean }).headersSent) {
-          balancer.onConnectionClosed(req);
-          return;
-        }
-        if (prevError) prevError(err, req, res);
-        balancer.onConnectionClosed(req);
-      };
-    }
-
-    // ── Response header transforms ────────────────────────────────────────────
-    const resTransform = headers?.response;
-    if (resTransform) {
-      const prevProxyRes = handlers.proxyRes;
-      handlers.proxyRes = (proxyRes, req, res) => {
-        if (prevProxyRes) prevProxyRes(proxyRes, req, res);
-        if (resTransform.set) {
-          for (const [key, val] of Object.entries(resTransform.set)) {
-            (res as unknown as ServerResponse).setHeader(key, val);
-          }
-        }
-        if (resTransform.remove) {
-          for (const key of resTransform.remove) {
-            (res as unknown as ServerResponse).removeHeader(key);
-          }
-        }
-      };
-    }
-
-    return handlers;
-  }
-
-  private async readRoutes(): Promise<Gateway[]> {
-    const fileRoutes = await this.readFileRoutes();
-    const envRoutes = this.readEnvRoutes();
-
-    return validateRoutes([...fileRoutes, ...envRoutes]);
-  }
-
-  private async readFileRoutes(): Promise<unknown[]> {
-    try {
-      const content = await readFile(this.filePath, "utf-8");
-      return JSON.parse(content) as unknown[];
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        logger.debug({ filePath: this.filePath }, "Routes file not found, skipping");
-        return [];
-      }
-      // Re-throw so callers (e.g. RouteReloader) can catch and keep the last good config
-      throw error;
-    }
-  }
-
-  private readEnvRoutes(): unknown[] {
-    const raw = process.env.ROUTES;
-    if (!raw) return [];
-
-    try {
-      return JSON.parse(raw) as unknown[];
-    } catch (error) {
-      logger.error({ err: error }, "Failed to parse ROUTES env var as JSON, skipping");
       return [];
     }
+
+    return routes.flatMap((route) => {
+      const handler = this.registrar.register(route);
+      return handler ? [handler] : [];
+    });
   }
 }

@@ -1,8 +1,9 @@
 import type { Gateway } from "../types/gateway";
+import type { JsonObject } from "./route-sources/RouteSource";
 import { GatewaysSchema } from "./validators/gateway.schema";
 
-export function validateRoutes(data: unknown): Gateway[] {
-  const result = GatewaysSchema.safeParse(data);
+export function validateRoutes(routes: JsonObject[]): Gateway[] {
+  const result = GatewaysSchema.safeParse(routes);
 
   if (!result.success) {
     const formatted = result.error.issues

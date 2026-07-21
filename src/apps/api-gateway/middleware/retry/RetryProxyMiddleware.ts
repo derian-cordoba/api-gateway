@@ -47,7 +47,7 @@ function serializeBody(req: Request): Buffer {
 }
 
 function isRetryable(statusCode: number): boolean {
-  return statusCode >= 500;
+  return statusCode >= HttpStatus.INTERNAL_SERVER_ERROR;
 }
 
 function makeUpstreamRequest(
@@ -137,7 +137,7 @@ export function createRetryProxyMiddleware(
       try {
         const upstream = await makeUpstreamRequest(target, req, body, pathRewrite, headersConfig);
         const { res: upstreamRes, body: upstreamBody } = upstream;
-        const status = upstreamRes.statusCode ?? 502;
+        const status = upstreamRes.statusCode ?? HttpStatus.BAD_GATEWAY;
 
         if (isRetryable(status) && attempt < config.attempts) {
           breaker?.recordFailure();
@@ -159,7 +159,7 @@ export function createRetryProxyMiddleware(
           return;
         }
 
-        if (status < 500) {
+        if (status < HttpStatus.INTERNAL_SERVER_ERROR) {
           breaker?.recordSuccess();
         } else {
           breaker?.recordFailure();
@@ -219,7 +219,7 @@ export function createRetryProxyMiddleware(
 
     if (res.headersSent) return;
 
-    const status = lastStatus >= 500 ? lastStatus : HttpStatus.BAD_GATEWAY;
+    const status = lastStatus >= HttpStatus.INTERNAL_SERVER_ERROR ? lastStatus : HttpStatus.BAD_GATEWAY;
     res.status(status).json({
       error: lastErr ? "Bad Gateway" : "Bad Gateway",
       message: lastErr?.message ?? `Upstream returned ${lastStatus}`,
