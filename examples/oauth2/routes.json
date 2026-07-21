@@ -1,0 +1,30 @@
+[
+  {
+    "baseURL": "/auth",
+    "proxy": {
+      "target": "http://localhost:4062",
+      "changeOrigin": true,
+      "pathRewrite": { "^/auth": "" }
+    }
+  },
+  {
+    "baseURL": "/protected",
+    "proxy": {
+      "target": "http://localhost:4063",
+      "changeOrigin": true,
+      "pathRewrite": { "^/protected": "" }
+    },
+    "headers": {
+      "request": {
+        "set": { "X-Forwarded-By": "api-gateway" }
+      }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "oauth2",
+      "introspectionUrl": "http://localhost:4062/introspect",
+      "clientId": "gateway-client",
+      "clientSecret": "gw-s3cr3t"
+    }
+  }
+]

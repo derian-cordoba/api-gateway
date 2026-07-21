@@ -49,4 +49,28 @@ export declare type BasicAuth = {
   realm?: string;
 };
 
-export declare type Auth = JwtAuth | ApiKeyAuth | BasicAuth;
+export declare type OAuth2Auth = {
+  enabled: boolean;
+  strategy: "oauth2";
+  /**
+   * URL of the OAuth 2.0 token introspection endpoint (RFC 7662).
+   * The gateway POSTs `token=<opaque_token>` to this endpoint and checks
+   * that the `active` field in the response is `true`.
+   */
+  introspectionUrl: string;
+  /**
+   * Client ID used for HTTP Basic authentication against the introspection endpoint.
+   */
+  clientId: string;
+  /**
+   * Client secret used for HTTP Basic authentication against the introspection endpoint.
+   */
+  clientSecret: string;
+  /**
+   * Optional `token_type_hint` parameter sent with the introspection request.
+   * Defaults to `"access_token"`.
+   */
+  tokenTypeHint?: string;
+};
+
+export declare type Auth = JwtAuth | ApiKeyAuth | BasicAuth | OAuth2Auth;

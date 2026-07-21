@@ -1,14 +1,15 @@
 import type { Router, Request, Response, NextFunction, RequestHandler } from "express";
 import type { Options } from "http-proxy-middleware";
-import type { IncomingMessage } from "node:http";
+import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
-
-import rateLimit from "express-rate-limit";
 import { StatusCodes as HttpStatus } from "http-status-codes";
+import rateLimit from "express-rate-limit";
 import { readFile } from "node:fs/promises";
+import cors from "cors";
 import type { Gateway } from "../types/gateway";
 import type { RateLimit } from "../types/rate-limit";
+import type { HeadersConfig } from "../types/headers";
 import { validateRoutes } from "./RouteValidator";
 import { createAuthMiddleware } from "../middleware/authMiddleware";
 import { createIpFilterMiddleware } from "../middleware/ipFilter";
@@ -64,6 +65,12 @@ export class ProxyManager {
   }
 
   private registerRoute(route: Gateway): WsUpgradeHandler | null {
+    // Per-route CORS — handles preflight (OPTIONS) and overrides global CORS headers.
+    // Mounted first so it runs before any access-control logic.
+    if (route.cors) {
+      this.router.use(route.baseURL, cors(route.cors));
+    }
+
     if (route.ipFilter) {
       this.router.use(route.baseURL, createIpFilterMiddleware(route.ipFilter));
     }
@@ -111,6 +118,7 @@ export class ProxyManager {
         route.proxy.pathRewrite as Record<string, string> | undefined,
         balancer,
         breaker,
+        route.headers,
       );
       this.router.use(route.baseURL, retryMiddleware);
 
@@ -128,7 +136,9 @@ export class ProxyManager {
       return null; // WS not supported with retry middleware
     }
 
-    const proxyMiddleware = createProxyMiddleware(this.buildProxyOptions(route, breaker, balancer));
+    const proxyMiddleware = createProxyMiddleware(
+      this.buildProxyOptions(route, breaker, balancer, route.headers),
+    );
 
     this.router.use(route.baseURL, proxyMiddleware);
 
@@ -181,6 +191,7 @@ export class ProxyManager {
     route: Gateway,
     breaker: CircuitBreaker | null,
     balancer: LoadBalancer | null,
+    headers?: HeadersConfig,
   ): Options {
     // Extract fields handled outside of http-proxy-middleware so they don't
     // get passed through as unknown proxy options.
@@ -191,7 +202,7 @@ export class ProxyManager {
 
     const options: Options = {
       ...proxyRest,
-      on: this.buildProxyOnHandlers(breaker, balancer),
+      on: this.buildProxyOnHandlers(breaker, balancer, headers),
     };
 
     // Use proxyTimeout (max wait for upstream response) rather than timeout
@@ -213,9 +224,31 @@ export class ProxyManager {
   private buildProxyOnHandlers(
     breaker: CircuitBreaker | null,
     balancer: LoadBalancer | null,
+    headers?: HeadersConfig,
   ): ProxyOnHandlers {
-    const handlers: ProxyOnHandlers = { proxyReq: fixRequestBody };
+    // ── Request handler ──────────────────────────────────────────────────────
+    // Always run fixRequestBody first, then apply any request header transforms.
+    const reqTransform = headers?.request;
+    const proxyReqHandler = reqTransform
+      ? (proxyReq: ClientRequest, req: IncomingMessage, res: ServerResponse) => {
+          fixRequestBody(proxyReq, req as Parameters<typeof fixRequestBody>[1]);
+          void res;
+          if (reqTransform.set) {
+            for (const [key, val] of Object.entries(reqTransform.set)) {
+              proxyReq.setHeader(key, val);
+            }
+          }
+          if (reqTransform.remove) {
+            for (const key of reqTransform.remove) {
+              proxyReq.removeHeader(key);
+            }
+          }
+        }
+      : fixRequestBody;
 
+    const handlers: ProxyOnHandlers = { proxyReq: proxyReqHandler };
+
+    // ── Circuit breaker ───────────────────────────────────────────────────────
     const cbHandlers = breaker ? new CircuitBreakerProxyHandlers(breaker).toOnHandlers() : null;
 
     if (cbHandlers) {
@@ -223,6 +256,7 @@ export class ProxyManager {
       handlers.error = cbHandlers.error;
     }
 
+    // ── Load balancer ─────────────────────────────────────────────────────────
     if (balancer) {
       const prevProxyRes = handlers.proxyRes;
       const prevError = handlers.error;
@@ -240,6 +274,25 @@ export class ProxyManager {
         }
         if (prevError) prevError(err, req, res);
         balancer.onConnectionClosed(req);
+      };
+    }
+
+    // ── Response header transforms ────────────────────────────────────────────
+    const resTransform = headers?.response;
+    if (resTransform) {
+      const prevProxyRes = handlers.proxyRes;
+      handlers.proxyRes = (proxyRes, req, res) => {
+        if (prevProxyRes) prevProxyRes(proxyRes, req, res);
+        if (resTransform.set) {
+          for (const [key, val] of Object.entries(resTransform.set)) {
+            (res as unknown as ServerResponse).setHeader(key, val);
+          }
+        }
+        if (resTransform.remove) {
+          for (const key of resTransform.remove) {
+            (res as unknown as ServerResponse).removeHeader(key);
+          }
+        }
       };
     }
 

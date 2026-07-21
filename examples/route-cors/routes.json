@@ -1,0 +1,25 @@
+[
+  {
+    "baseURL": "/public-api",
+    "proxy": {
+      "target": "http://localhost:4061",
+      "changeOrigin": true,
+      "pathRewrite": { "^/public-api": "" }
+    }
+  },
+  {
+    "baseURL": "/restricted-api",
+    "proxy": {
+      "target": "http://localhost:4061",
+      "changeOrigin": true,
+      "pathRewrite": { "^/restricted-api": "" }
+    },
+    "cors": {
+      "origin": ["http://trusted.example.com", "https://trusted.example.com"],
+      "methods": ["GET", "OPTIONS"],
+      "allowedHeaders": ["Content-Type", "Authorization"],
+      "credentials": false,
+      "maxAge": 3600
+    }
+  }
+]

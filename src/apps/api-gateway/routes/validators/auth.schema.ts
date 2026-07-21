@@ -29,8 +29,18 @@ const BasicAuthSchema = z.object({
   realm: z.string().optional(),
 });
 
+const OAuth2AuthSchema = z.object({
+  enabled: z.boolean(),
+  strategy: z.literal("oauth2"),
+  introspectionUrl: z.string().url("introspectionUrl must be a valid URL"),
+  clientId: z.string().min(1, "clientId must not be empty"),
+  clientSecret: z.string().min(1, "clientSecret must not be empty"),
+  tokenTypeHint: z.string().optional(),
+});
+
 export const AuthSchema = z.discriminatedUnion("strategy", [
   JwtAuthSchema,
   ApiKeyAuthSchema,
   BasicAuthSchema,
+  OAuth2AuthSchema,
 ]);

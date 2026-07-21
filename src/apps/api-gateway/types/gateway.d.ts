@@ -1,10 +1,12 @@
 import { Auth } from "./auth";
 import { CacheConfig } from "./cache";
 import { CircuitBreakerConfig } from "./circuit-breaker";
+import { HeadersConfig } from "./headers";
 import { IpFilter } from "./ip-filter";
 import { Proxy } from "./proxy";
 import { RateLimit } from "./rate-limit";
 import { RetryConfig } from "./retry";
+import { RouteCors } from "./route-cors";
 
 export declare type Gateway = {
   /**
@@ -56,4 +58,18 @@ export declare type Gateway = {
    * and served directly on cache hits without proxying.
    */
   cache?: CacheConfig;
+
+  /**
+   * Header transformation rules for this route.
+   * `request` transforms are applied to the outgoing request sent to the upstream.
+   * `response` transforms are applied to the response returned to the client.
+   */
+  headers?: HeadersConfig;
+
+  /**
+   * Route-level CORS policy. Overrides the global CORS configuration for this
+   * route, including preflight (OPTIONS) handling.
+   * When omitted, OPTIONS requests are forwarded to the upstream.
+   */
+  cors?: RouteCors;
 };

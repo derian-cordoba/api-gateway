@@ -1,6 +1,6 @@
 # API Gateway
 
-A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route load balancing, rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, request timeouts, WebSocket proxying, structured logging, and full security headers out of the box.
+A generic, configuration-driven HTTP API gateway. Routes incoming requests to upstream services via a JSON config file or environment variable, with per-route load balancing, rate limiting, authentication, circuit breaking, IP filtering, request ID propagation, request timeouts, WebSocket proxying, retry with backoff, response caching, Prometheus metrics, header transformation, route-level CORS, OAuth 2.0 token introspection, structured logging, and full security headers out of the box.
 
 ---
 
@@ -16,12 +16,19 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
   - [JWT](#jwt)
   - [API Key](#api-key)
   - [Basic Auth](#basic-auth)
+  - [OAuth 2.0 Token Introspection](#oauth-20-token-introspection)
 - [Request Timeout per Route](#request-timeout-per-route)
 - [Circuit Breaker](#circuit-breaker)
 - [Load Balancing](#load-balancing)
 - [WebSocket Proxying](#websocket-proxying)
 - [Request ID Propagation](#request-id-propagation)
 - [IP Allowlist / Blocklist](#ip-allowlist--blocklist)
+- [Retry with Backoff](#retry-with-backoff)
+- [Response Caching](#response-caching)
+- [Prometheus Metrics](#prometheus-metrics)
+- [Header Transformation](#header-transformation)
+- [Route-Level CORS Override](#route-level-cors-override)
+- [Hot Config Reload](#hot-config-reload)
 - [Running the Gateway](#running-the-gateway)
 - [Health Check](#health-check)
 - [Project Structure](#project-structure)
@@ -48,6 +55,13 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Health check endpoint** — `GET /health` returns uptime, version, and timestamp; always available regardless of configured routes
 - **Optional URL prefix** — mount all routes under a shared prefix (e.g. `/api/v1`) via `GATEWAY_PREFIX`
 - **Body forwarding** — JSON bodies on `POST`, `PUT`, and `PATCH` requests are correctly forwarded to upstreams (`fixRequestBody`)
+- **Retry with backoff** — per-route retry policy that transparently retries 5xx responses and network errors before returning a failure to the client; supports fixed and exponential backoff; composable with load balancing and the circuit breaker
+- **In-memory response caching** — cache upstream responses per route with a configurable TTL; cache hits bypass the upstream entirely and return the stored response with an `X-Cache: HIT` header; configurable by HTTP method and status code
+- **Prometheus metrics endpoint** — `GET /metrics` exposes `gateway_requests_total`, `gateway_request_duration_seconds`, `gateway_upstream_errors_total`, and `gateway_cache_hits_total` in Prometheus text format; labelled by route and method for easy dashboarding
+- **Per-route header transformation** — add, override, or remove individual headers on the outgoing upstream request and/or the response returned to the client; no code changes needed when onboarding a new upstream with different header conventions
+- **Route-level CORS override** — each route can declare its own CORS policy (origin, methods, allowed headers, credentials, preflight `maxAge`) that takes precedence over the global configuration; preflight `OPTIONS` requests are handled entirely by the gateway for routes that have a cors block
+- **OAuth 2.0 token introspection** — fourth auth strategy that validates opaque Bearer tokens by calling an RFC 7662 introspection endpoint; the gateway authenticates to the introspection endpoint using HTTP Basic auth with configurable `clientId` / `clientSecret`
+- **Hot config reload** — edit the routes JSON file (or send `SIGHUP`) and the gateway picks up the new routing table immediately, with no process restart and no dropped connections; built-in 300 ms debounce prevents churn on rapid saves
 - **Graceful shutdown** — `SIGINT` and `uncaughtException` handlers stop the server cleanly before exiting
 
 ---
@@ -133,9 +147,13 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
   baseURL:         string          // required — path prefix to match, must start with "/"
   proxy:           Proxy          // required — upstream proxy settings (single target or load-balanced targets)
   rateLimit?:      RateLimit      // optional — per-route rate limiting
-  auth?:           Auth           // optional — per-route authentication
+  auth?:           Auth           // optional — per-route authentication (JWT, API key, Basic, OAuth2)
   circuitBreaker?: CircuitBreaker // optional — per-route circuit breaker
   ipFilter?:       IpFilter       // optional — per-route IP allowlist / blocklist
+  retry?:          Retry          // optional — per-route retry with backoff
+  cache?:          Cache          // optional — per-route in-memory response caching
+  headers?:        Headers        // optional — per-route request / response header transforms
+  cors?:           RouteCors      // optional — per-route CORS policy (overrides global)
 }
 ```
 
@@ -228,6 +246,57 @@ Restricts access to a route based on the client's IP address. At least one of `a
 | `deny` | `string[]` | — | IPv4 addresses or CIDR ranges that are explicitly blocked. Evaluated before `allow` — a match returns `403` immediately. At least one entry required. |
 
 Both fields accept plain IPv4 addresses (`192.168.1.1`) and CIDR notation (`10.0.0.0/8`). IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1`) are normalised to their IPv4 form before matching, so you never need to list both forms.
+
+#### `Retry`
+
+Automatically retries failed upstream requests (5xx responses or network errors) before returning a failure to the client. The upstream is called up to `attempts + 1` times total. See [Retry with Backoff](#retry-with-backoff) for a full explanation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `attempts` | `number` | ✅ | Maximum number of retry attempts after the first failure. Must be at least `1`. |
+| `delay` | `number` | ✅ | Base delay in milliseconds between retries. |
+| `backoff` | `"fixed" \| "exponential"` | — | Backoff strategy. `"fixed"` waits `delay` ms every time. `"exponential"` doubles the wait on each attempt (`delay × 2^n`). Defaults to `"fixed"`. |
+
+#### `Cache`
+
+Caches successful upstream responses in memory per route. Cache hits bypass the upstream entirely. See [Response Caching](#response-caching) for a full explanation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ttl` | `number` | ✅ | Time-to-live in milliseconds. |
+| `methods` | `string[]` | — | HTTP methods to cache. Defaults to `["GET", "HEAD"]`. |
+| `statusCodes` | `number[]` | — | HTTP status codes to cache. Defaults to `[200, 203, 204]`. |
+
+#### `Headers`
+
+Transforms request headers before forwarding to the upstream and/or response headers before returning to the client. See [Header Transformation](#header-transformation) for a full explanation.
+
+```ts
+{
+  request?: {
+    set?:    Record<string, string>  // add or override headers sent to the upstream
+    remove?: string[]                // remove headers before forwarding
+  }
+  response?: {
+    set?:    Record<string, string>  // add or override headers returned to the client
+    remove?: string[]                // remove headers before returning to the client
+  }
+}
+```
+
+At least one of `set` or `remove` must be present inside each transform block; at least one of `request` or `response` must be present in the `headers` object.
+
+#### `RouteCors`
+
+Overrides the global CORS policy for a specific route, including preflight `OPTIONS` handling. Routes without a `cors` block inherit the global config and forward `OPTIONS` to the upstream. See [Route-Level CORS Override](#route-level-cors-override) for a full explanation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `origin` | `string \| string[] \| boolean` | ✅ | Allowed origins. A single domain string, an array of domains, `true` to reflect the request `Origin` header, or `false` to disable CORS for this route. |
+| `methods` | `string[]` | — | Allowed HTTP methods. Defaults to the global `CORS_METHODS` config. |
+| `allowedHeaders` | `string[]` | — | Allowed request headers. Defaults to the global `CORS_HEADERS` config. |
+| `credentials` | `boolean` | — | Whether to allow credentials (cookies, `Authorization` header). When `true`, `origin` must not be `"*"`. |
+| `maxAge` | `number` | — | Seconds the browser may cache the preflight response (`Access-Control-Max-Age`). |
 
 #### Example `routes.json`
 
@@ -478,6 +547,58 @@ curl -si http://localhost:3000/admin | head -3
 > **Note:** HTTP Basic Auth transmits credentials in Base64, which is trivially reversible. Always use it behind TLS in production (`HTTPS`).
 
 Multiple credential pairs in `credentials` let you issue per-client credentials and revoke them individually without changing every consumer.
+
+### OAuth 2.0 Token Introspection
+
+Validate opaque Bearer tokens by calling an RFC 7662 token introspection endpoint. The gateway posts the token to the configured `introspectionUrl`, authenticates itself with HTTP Basic auth using `clientId`/`clientSecret`, and allows the request through only when the introspection response returns `active: true`.
+
+```json
+{
+  "baseURL": "/protected",
+  "proxy": { "target": "http://api-service:3010", "changeOrigin": true },
+  "auth": {
+    "enabled": true,
+    "strategy": "oauth2",
+    "introspectionUrl": "https://auth.example.com/oauth/introspect",
+    "clientId": "gateway-client",
+    "clientSecret": "s3cr3t"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | ✅ | `true` to enforce, `false` to bypass. |
+| `strategy` | `"oauth2"` | ✅ | — |
+| `introspectionUrl` | `string` | ✅ | Full URL of the RFC 7662 introspection endpoint. |
+| `clientId` | `string` | ✅ | Client ID used for HTTP Basic auth against the introspection endpoint. |
+| `clientSecret` | `string` | ✅ | Client secret used for HTTP Basic auth against the introspection endpoint. |
+| `tokenTypeHint` | `string` | — | `token_type_hint` parameter sent with the introspection request (default: `"access_token"`). |
+
+**How it works:**
+
+1. The gateway extracts the `Bearer <token>` from the `Authorization` header.
+2. It POSTs `token=<opaque_token>&token_type_hint=access_token` to `introspectionUrl`.
+3. The request to the introspection endpoint carries `Authorization: Basic base64(clientId:clientSecret)`.
+4. If the endpoint responds with `{ "active": true }`, the request is forwarded to the upstream.
+5. Any other response — `active: false`, a non-2xx HTTP status, or a network error — returns `401 Unauthorized` to the client.
+
+```bash
+# 1. Get a token from your auth server (issuer-specific, not proxied through the gateway here)
+TOKEN=$(curl -s -X POST https://auth.example.com/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"s3cr3t"}' | jq -r '.access_token')
+
+# 2. Access the protected route
+curl http://localhost:3000/protected \
+  -H "Authorization: Bearer $TOKEN"
+
+# 3. Missing or forged token → 401
+curl http://localhost:3000/protected \
+  -H "Authorization: Bearer fake-token"
+```
+
+> **Note:** The gateway calls the introspection endpoint on every request. For high-traffic routes, consider fronting the introspection endpoint with a short-lived cache in your auth server to avoid becoming a bottleneck.
 
 ---
 
@@ -881,6 +1002,329 @@ IP filtering runs as the **first middleware** on a route, before authentication 
 
 ---
 
+## Retry with Backoff
+
+Automatically retry failed upstream requests before returning a failure to the client. The gateway buffers the full upstream response on each attempt — it never streams a 5xx to the client — so retries are completely transparent. Both HTTP 5xx responses and network-level errors (e.g. `ECONNREFUSED`) trigger a retry.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/inventory",
+  "proxy": {
+    "target": "http://inventory-service:3001",
+    "changeOrigin": true,
+    "pathRewrite": { "^/inventory": "" }
+  },
+  "retry": {
+    "attempts": 3,
+    "delay": 200,
+    "backoff": "exponential"
+  }
+}
+```
+
+With `attempts: 3` and `backoff: "exponential"`, the gateway tries the upstream up to 4 times total (1 initial + 3 retries). The delays between attempts are 200 ms, 400 ms, 800 ms.
+
+### Backoff strategies
+
+| Strategy | Delay formula | Example (`delay: 200`) |
+|---|---|---|
+| `"fixed"` | `delay` | 200 ms, 200 ms, 200 ms |
+| `"exponential"` | `delay × 2^n` | 200 ms, 400 ms, 800 ms |
+
+### Response when all attempts fail
+
+```
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/json
+
+{
+  "error": "Bad Gateway",
+  "message": "Upstream returned 503"
+}
+```
+
+The status code mirrors the last upstream failure. The client receives no indication of how many retries occurred.
+
+### Composing with load balancing and circuit breaker
+
+```json
+{
+  "baseURL": "/api",
+  "proxy": {
+    "targets": [
+      { "url": "http://api-1:3001" },
+      { "url": "http://api-2:3002" }
+    ],
+    "strategy": "round-robin"
+  },
+  "retry": { "attempts": 2, "delay": 100, "backoff": "exponential" },
+  "circuitBreaker": { "threshold": 5, "timeout": 30000 }
+}
+```
+
+Each retry attempt selects the next target from the load balancer independently. Circuit-breaker failures are recorded on every failing attempt.
+
+> **Note:** WebSocket routes (`ws: true`) do not support retry — the connection upgrade is a one-shot handshake.
+
+---
+
+## Response Caching
+
+Cache successful upstream responses in memory per route. Once cached, subsequent requests matching the same method and URL are served from the cache without hitting the upstream at all — reducing latency and upstream load for read-heavy endpoints.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/catalog",
+  "proxy": {
+    "target": "http://catalog-service:3002",
+    "changeOrigin": true,
+    "pathRewrite": { "^/catalog": "" }
+  },
+  "cache": {
+    "ttl": 30000,
+    "methods": ["GET", "HEAD"],
+    "statusCodes": [200]
+  }
+}
+```
+
+### Options
+
+| Field | Default | Description |
+|---|---|---|
+| `ttl` | — _(required)_ | Time-to-live in milliseconds. The cached entry is evicted on the next access after TTL expires. |
+| `methods` | `["GET", "HEAD"]` | HTTP methods to cache. |
+| `statusCodes` | `[200, 203, 204]` | Upstream status codes to cache. Non-matching responses are always forwarded without caching. |
+
+### Cache key
+
+The cache key is `METHOD:originalURL`. Each route maintains its own independent cache store, so `/catalog` and `/catalog/1` have separate entries even when they share the same route.
+
+### Response headers
+
+| Header | Value | Description |
+|---|---|---|
+| `X-Cache` | `MISS` | First request — served from upstream and stored. |
+| `X-Cache` | `HIT` | Subsequent requests — served from cache; upstream not contacted. |
+
+```bash
+# First request — cache MISS (~200 ms upstream latency)
+curl -si http://localhost:3000/catalog | grep X-Cache
+# X-Cache: MISS
+
+# Subsequent requests — cache HIT (< 5 ms)
+curl -si http://localhost:3000/catalog | grep X-Cache
+# X-Cache: HIT
+
+# POST bypasses the cache (not in `methods`)
+curl -s -X POST http://localhost:3000/catalog \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Widget"}' | head -1
+```
+
+---
+
+## Prometheus Metrics
+
+The gateway exposes a `GET /metrics` endpoint in Prometheus text format. Scrape it with any Prometheus-compatible monitoring stack (Prometheus, Grafana, Datadog Agent, etc.).
+
+```
+GET /metrics
+```
+
+### Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `gateway_requests_total` | Counter | `route`, `method`, `status_code` | Total number of requests processed per route. |
+| `gateway_request_duration_seconds` | Histogram | `route`, `method` | End-to-end request latency in seconds (client → upstream → client). |
+| `gateway_upstream_errors_total` | Counter | `route`, `error_type` | Upstream errors (5xx responses or network errors) per route. |
+| `gateway_cache_hits_total` | Counter | `route` | Number of responses served from the in-memory cache per route. |
+
+### Example
+
+```bash
+# View all gateway metrics
+curl -s http://localhost:3000/metrics | grep '^gateway_'
+
+# Filter to a specific metric
+curl -s http://localhost:3000/metrics | grep gateway_requests_total
+# gateway_requests_total{route="/orders",method="GET",status_code="200"} 42
+# gateway_requests_total{route="/orders",method="POST",status_code="201"} 7
+```
+
+### Prometheus scrape config
+
+```yaml
+scrape_configs:
+  - job_name: api-gateway
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: /metrics
+```
+
+If `GATEWAY_PREFIX` is set, the endpoint is available at `<GATEWAY_PREFIX>/metrics`.
+
+---
+
+## Header Transformation
+
+Add, override, or remove individual headers on the outgoing upstream request and/or the response returned to the client — without touching any upstream code.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/api",
+  "proxy": {
+    "target": "http://api-service:3001",
+    "changeOrigin": true
+  },
+  "headers": {
+    "request": {
+      "set": {
+        "X-Forwarded-By": "api-gateway",
+        "X-Api-Version": "2",
+        "X-Internal-Token": "secret-only-upstreams-see"
+      },
+      "remove": ["User-Agent", "X-Powered-By"]
+    },
+    "response": {
+      "set": {
+        "X-Frame-Options": "DENY",
+        "Cache-Control": "no-store"
+      },
+      "remove": ["Server", "X-Powered-By"]
+    }
+  }
+}
+```
+
+### `headers.request`
+
+Applied to every request before it is forwarded to the upstream.
+
+| Sub-field | Type | Description |
+|---|---|---|
+| `set` | `Record<string, string>` | Headers to add or override. Applied after all client headers are copied, so these always win. |
+| `remove` | `string[]` | Headers to strip before forwarding. Header names are case-insensitive. |
+
+### `headers.response`
+
+Applied to every response from the upstream before it is returned to the client.
+
+| Sub-field | Type | Description |
+|---|---|---|
+| `set` | `Record<string, string>` | Headers to add or override on the client-facing response. |
+| `remove` | `string[]` | Headers to strip from the upstream response before returning to the client. |
+
+### Common use cases
+
+- **Add an internal secret header** the upstream trusts but the client never sends.
+- **Strip `Server` / `X-Powered-By`** to avoid leaking implementation details.
+- **Inject `X-Frame-Options`** or other security headers on responses from upstreams that don't set them.
+- **Normalise versioning** with `X-Api-Version` across a mixed fleet of upstreams.
+
+Header transforms are fully composable with all other per-route features (auth, rate limiting, caching, retry, etc.).
+
+---
+
+## Route-Level CORS Override
+
+The global CORS policy (configured via `CORS_ORIGINS`, `CORS_METHODS`, `CORS_HEADERS` environment variables) applies to all routes. Add a `cors` block to any route to replace that policy with a tighter or looser one — for example, to allow credentials on a specific API while keeping the default `origin: *` everywhere else.
+
+### Configuration
+
+```json
+{
+  "baseURL": "/admin-api",
+  "proxy": {
+    "target": "http://admin-service:3010",
+    "changeOrigin": true
+  },
+  "cors": {
+    "origin": ["https://admin.example.com"],
+    "methods": ["GET", "POST", "PUT", "DELETE"],
+    "allowedHeaders": ["Content-Type", "Authorization"],
+    "credentials": true,
+    "maxAge": 3600
+  }
+}
+```
+
+### How it works
+
+- Routes **with** a `cors` block handle `OPTIONS` preflight entirely at the gateway — the upstream never sees a preflight request.
+- Routes **without** a `cors` block forward `OPTIONS` to the upstream (useful when your upstreams manage their own CORS).
+- For non-`OPTIONS` requests, the route-level CORS middleware sets the appropriate `Access-Control-*` headers, overriding the global config.
+
+```bash
+# Allowed origin — ACAO reflects the specific domain
+curl -si http://localhost:3000/admin-api \
+  -H "Origin: https://admin.example.com" | grep -i access-control-allow-origin
+# Access-Control-Allow-Origin: https://admin.example.com
+
+# Disallowed origin — no ACAO header (browser blocks the request)
+curl -si http://localhost:3000/admin-api \
+  -H "Origin: https://evil.example.com" | grep -i access-control-allow-origin
+
+# Preflight — handled by the gateway, upstream not contacted
+curl -si -X OPTIONS http://localhost:3000/admin-api \
+  -H "Origin: https://admin.example.com" \
+  -H "Access-Control-Request-Method: POST" | head -8
+# HTTP/1.1 204 No Content
+# Access-Control-Allow-Origin: https://admin.example.com
+# Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+# Access-Control-Max-Age: 3600
+```
+
+---
+
+## Hot Config Reload
+
+Edit the routes JSON file and the gateway picks up the changes immediately — no process restart, no dropped connections, no downtime.
+
+### Trigger a reload
+
+| Method | How |
+|---|---|
+| **File change** | Save any change to the file at `ROUTES_FILE_PATH`. The gateway detects the change and reloads within 300 ms (debounced). |
+| **Signal** | Send `SIGHUP` to the gateway process: `kill -HUP <pid>` |
+
+### What happens on reload
+
+1. The new routes file is read and validated with Zod.
+2. A brand-new inner router is built with all middleware for the new config.
+3. The reference is swapped atomically — new requests immediately use the new router.
+4. In-flight requests finish against the old router undisturbed.
+
+### State after reload
+
+| State | Behaviour |
+|---|---|
+| In-flight HTTP requests | Finish against the old routing table |
+| Circuit-breaker / rate-limit state | Reset (new instances per reload) |
+| Active WebSocket connections | Survive — the tunnel is already established |
+
+If the new config is invalid (bad JSON, Zod validation error), the gateway logs an error and **keeps the current config** — no partial reload, no downtime.
+
+```bash
+# Start the gateway
+pnpm dev
+
+# Edit routes.json (add a new route, change a target URL, etc.)
+# The gateway log prints: "Routes reloaded successfully"
+
+# Or send SIGHUP manually
+kill -HUP $(lsof -ti tcp:3000)
+```
+
+---
+
 ## Running the Gateway
 
 ### Development (hot-reload)
@@ -958,37 +1402,56 @@ src/apps/api-gateway/
 │   ├── timeout.ts            # Per-route 504 timeout middleware
 │   ├── authMiddleware.ts     # Factory — returns the right strategy or a no-op
 │   ├── auth/
-│   │   ├── AuthStrategy.ts        # Interface (Strategy pattern)
-│   │   ├── JwtAuthStrategy.ts     # JWT Bearer token validation (HMAC + RSA/EC)
-│   │   ├── ApiKeyAuthStrategy.ts  # Header-based API key validation
-│   │   └── BasicAuthStrategy.ts   # HTTP Basic Auth with timing-safe credential check
+│   │   ├── AuthStrategy.ts         # Interface (Strategy pattern)
+│   │   ├── JwtAuthStrategy.ts      # JWT Bearer token validation (HMAC + RSA/EC)
+│   │   ├── ApiKeyAuthStrategy.ts   # Header-based API key validation
+│   │   ├── BasicAuthStrategy.ts    # HTTP Basic Auth with timing-safe credential check
+│   │   └── OAuth2AuthStrategy.ts   # OAuth 2.0 token introspection (RFC 7662)
 │   ├── circuit-breaker/
 │   │   ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
 │   │   └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
-│   └── load-balancer/
-│       └── LoadBalancer.ts       # Round-robin, weighted, and least-connections strategies
+│   ├── load-balancer/
+│   │   └── LoadBalancer.ts         # Round-robin, weighted, and least-connections strategies
+│   ├── retry/
+│   │   └── RetryProxyMiddleware.ts # Node http/https retry proxy with fixed/exponential backoff
+│   ├── cache/
+│   │   ├── ResponseCache.ts        # In-memory TTL cache (Map-based, per-route)
+│   │   └── createCacheMiddleware.ts # Express middleware — serves HITs, intercepts MISSes
+│   └── metrics/
+│       ├── MetricsCollector.ts     # prom-client wrapper with isolated Registry
+│       └── createMetricsMiddleware.ts # Records request counts, latency, errors, cache hits
 │
 ├── routes/
 │   ├── Router.ts             # Middleware pipeline (logging → security → CORS → body → proxy → errors)
+│   ├── RouteReloader.ts      # Hot-reload — watches routes file, swaps inner router on change
 │   ├── ProxyManager.ts       # Reads, validates, and registers proxy routes
 │   ├── RouteValidator.ts     # Validates route config and delegates to schema modules
 │   ├── HealthRouter.ts       # GET /health handler
+│   ├── MetricsRouter.ts      # GET /metrics handler (Prometheus text format)
 │   └── validators/           # One Zod schema per domain
 │       ├── proxy.schema.ts
 │       ├── rate-limit.schema.ts
 │       ├── auth.schema.ts
 │       ├── circuit-breaker.schema.ts
 │       ├── ip-filter.schema.ts
+│       ├── retry.schema.ts
+│       ├── cache.schema.ts
+│       ├── headers.schema.ts
+│       ├── route-cors.schema.ts
 │       └── gateway.schema.ts
 │
 └── types/
-    ├── gateway.d.ts          # Gateway type
+    ├── gateway.d.ts          # Gateway type (all per-route config fields)
     ├── proxy.d.ts            # Proxy type (single target or load-balanced targets; timeout)
     ├── rate-limit.d.ts       # RateLimit type
-    ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth | BasicAuth)
+    ├── auth.d.ts             # Auth type (JwtAuth | ApiKeyAuth | BasicAuth | OAuth2Auth)
     ├── circuit-breaker.d.ts  # CircuitBreakerConfig type
     ├── ip-filter.d.ts        # IpFilter type
-    └── load-balancer.d.ts    # WeightedTarget, BalancerStrategy types
+    ├── load-balancer.d.ts    # WeightedTarget, BalancerStrategy types
+    ├── retry.d.ts            # RetryConfig type
+    ├── cache.d.ts            # CacheConfig type
+    ├── headers.d.ts          # HeadersConfig, HeaderTransform types
+    └── route-cors.d.ts       # RouteCors type
 ```
 
 ---
@@ -1008,6 +1471,7 @@ Copies `examples/.env` to the project root and starts all services. Once running
 | Endpoint | Feature | Description |
 |---|---|---|
 | `http://localhost:3000/health` | — | Gateway health check |
+| `http://localhost:3000/metrics` | Prometheus metrics | All gateway metrics |
 | `http://localhost:3000/users` | Rate limiting | Users service |
 | `http://localhost:3000/products` | Rate limiting | Products service |
 | `http://localhost:3000/auth/login` | — | Issues JWT tokens |
@@ -1019,6 +1483,14 @@ Copies `examples/.env` to the project root and starts all services. Once running
 | `http://localhost:3000/analytics/internal` | IP filter | Analytics service — allow: `127.0.0.1` |
 | `http://localhost:3000/catalog` | Load balancing | Catalog service — round-robin across A, B, C |
 | `ws://localhost:3000/chat` | WebSocket | Chat service — WS echo server |
+| `http://localhost:3000/retry-inventory` | Retry with backoff | Inventory service — 3 attempts, exponential |
+| `http://localhost:3000/cached-catalog` | Response caching | Catalog service — TTL 30 s, GET/HEAD |
+| `http://localhost:3000/metrics-orders` | Prometheus + cache | Orders service — cached, drives counters |
+| `http://localhost:3000/echo` | Header transformation | Echo server — shows upstream-received headers |
+| `http://localhost:3000/public-api` | Global CORS | `origin: *` |
+| `http://localhost:3000/restricted-api` | Route-level CORS | `origin: trusted.example.com` |
+| `http://localhost:3000/oauth2-auth/login` | OAuth 2.0 | Issues opaque tokens |
+| `http://localhost:3000/oauth2-protected` | OAuth 2.0 | Token introspection required |
 
 ### Public routes
 
@@ -1163,6 +1635,12 @@ Each sub-directory is also a standalone reference:
 | `examples/ip-filter/` | IP allowlist / blocklist — Analytics service with three routes (open / allow / deny) |
 | `examples/load-balancer/` | Load balancing — Catalog service with three instances; demonstrates round-robin, weighted, and least-connections |
 | `examples/websocket/` | WebSocket proxying — Chat echo server; raw RFC 6455 implementation using Node.js built-ins |
+| `examples/retry/` | Retry with backoff — Inventory service with healthy / flaky / failing modes; runtime mode control via admin API |
+| `examples/cache/` | Response caching — Catalog service with 200 ms upstream latency; compare MISS vs HIT latency |
+| `examples/metrics/` | Prometheus metrics — Orders service with cache + error injection; includes Prometheus scrape config tip |
+| `examples/header-transform/` | Header transformation — Echo server that shows what the upstream actually received; demo of request + response transforms |
+| `examples/route-cors/` | Route-level CORS — Two routes sharing one upstream: global CORS vs per-route restrictive CORS; preflight demo |
+| `examples/oauth2/` | OAuth 2.0 token introspection — Mock auth server with `/login` + `/introspect`; protected upstream API |
 
 ---
 
@@ -1179,21 +1657,28 @@ Express app / raw HTTP server
   ├─ requestId              inject / forward X-Request-ID header
   ├─ pino-http              structured request/response logging (req.id = X-Request-ID)
   ├─ helmet                 security headers (CSP, HSTS, X-Frame-Options, …)
-  ├─ cors                   configurable origin / method / header policy
+  ├─ cors (global)          configurable origin / method / header policy; preflightContinue: true
   ├─ express.json           body parsing
   ├─ compression            gzip response compression
   │
   ├─ GET /health            health check — short-circuits here
+  ├─ GET /metrics           Prometheus metrics endpoint — short-circuits here
   │
+  ├─ cors (per-route)       optional — handles preflight (OPTIONS → 204) and overrides global CORS
   ├─ ipFilter               per-route — IP allow/deny check → 403 on block
-  ├─ authMiddleware         per-route — JWT, API key, or Basic Auth check → 401 on failure
+  ├─ authMiddleware         per-route — JWT / API key / Basic / OAuth2 check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
+  ├─ metrics middleware     per-route — records request count, latency, errors, cache hits
+  ├─ cache middleware       per-route — serves HIT immediately; intercepts MISS for caching
   ├─ timeout middleware     per-route — sends 504 if upstream doesn't respond in time
+  │
+  ├─ retry proxy            per-route (retry routes) — buffers response; retries 5xx / errors
+  │
   ├─ http-proxy-middleware  proxies request to upstream; load balancer selects target
   │    ├─ router()          load balancer pick (round-robin / weighted / least-connections)
-  │    ├─ proxyReq          fix request body; open connection (least-connections)
-  │    ├─ proxyRes          5xx → recordFailure; close connection (least-connections)
+  │    ├─ proxyReq          fix body; apply request header transforms; open connection
+  │    ├─ proxyRes          5xx → recordFailure; apply response header transforms; close connection
   │    └─ error             network error → recordFailure + 502; close connection
   │
   ├─ WS upgrade (server)    per-ws-route — tunnels WebSocket frames to upstream

@@ -82,6 +82,10 @@ export class Router {
         origin: origins,
         methods,
         allowedHeaders,
+        // Allow OPTIONS to continue so that per-route cors middleware can
+        // handle preflight with route-specific policies. Routes without a
+        // cors override forward OPTIONS to the upstream via the proxy.
+        preflightContinue: true,
       })
     );
   }

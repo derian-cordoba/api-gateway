@@ -4,6 +4,7 @@ import { request as httpsRequest } from "node:https";
 import { URL } from "node:url";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { RetryConfig } from "../../types/retry";
+import type { HeadersConfig } from "../../types/headers";
 import type { CircuitBreaker } from "../circuit-breaker/CircuitBreaker";
 import type { LoadBalancer } from "../load-balancer/LoadBalancer";
 import { logger } from "../../logger";
@@ -54,6 +55,7 @@ function makeUpstreamRequest(
   req: Request,
   body: Buffer,
   pathRewrite: Record<string, string> | undefined,
+  headersConfig?: HeadersConfig,
 ): Promise<{ res: IncomingMessage; body: Buffer }> {
   return new Promise((resolve, reject) => {
     let pathname = req.url ?? "/";
@@ -68,17 +70,32 @@ function makeUpstreamRequest(
     const useHttps = parsed.protocol === "https:";
     const transport = useHttps ? httpsRequest : httpRequest;
 
+    // Build outgoing headers, applying request transforms on top of the
+    // forwarded client headers.
+    const outHeaders: Record<string, unknown> = {
+      ...req.headers,
+      host: parsed.host,
+      "content-length": body.length,
+    };
+
+    if (headersConfig?.request?.set) {
+      for (const [key, val] of Object.entries(headersConfig.request.set)) {
+        outHeaders[key.toLowerCase()] = val;
+      }
+    }
+    if (headersConfig?.request?.remove) {
+      for (const key of headersConfig.request.remove) {
+        delete outHeaders[key.toLowerCase()];
+      }
+    }
+
     const upstreamReq = transport(
       {
         hostname: parsed.hostname,
         port: parsed.port || (useHttps ? 443 : 80),
         path: parsed.pathname + (parsed.search ?? ""),
         method: req.method,
-        headers: {
-          ...req.headers,
-          host: parsed.host,
-          "content-length": body.length,
-        },
+        headers: outHeaders as Record<string, string | string[] | number>,
       },
       (upstreamRes) => {
         const chunks: Buffer[] = [];
@@ -100,6 +117,7 @@ export function createRetryProxyMiddleware(
   pathRewrite: Record<string, string> | undefined,
   balancer: LoadBalancer | null,
   breaker: CircuitBreaker | null,
+  headersConfig?: HeadersConfig,
 ): RequestHandler {
   return async (req: Request, res: Response) => {
     const body = serializeBody(req);
@@ -117,7 +135,7 @@ export function createRetryProxyMiddleware(
       const target = balancer ? balancer.selectTarget(req) : proxyTarget!;
 
       try {
-        const upstream = await makeUpstreamRequest(target, req, body, pathRewrite);
+        const upstream = await makeUpstreamRequest(target, req, body, pathRewrite, headersConfig);
         const { res: upstreamRes, body: upstreamBody } = upstream;
         const status = upstreamRes.statusCode ?? 502;
 
@@ -161,6 +179,18 @@ export function createRetryProxyMiddleware(
         for (const [key, value] of Object.entries(upstreamRes.headers)) {
           if (!hopByHop.has(key.toLowerCase()) && value !== undefined) {
             res.setHeader(key, value as string | string[]);
+          }
+        }
+
+        // Apply response header transforms
+        if (headersConfig?.response?.set) {
+          for (const [key, val] of Object.entries(headersConfig.response.set)) {
+            res.setHeader(key, val);
+          }
+        }
+        if (headersConfig?.response?.remove) {
+          for (const key of headersConfig.response.remove) {
+            res.removeHeader(key);
           }
         }
 

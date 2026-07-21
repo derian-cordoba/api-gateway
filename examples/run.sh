@@ -25,6 +25,10 @@ RETRY_INVENTORY_ADMIN_PORT=4041
 CACHED_CATALOG_PORT=4050
 METRICS_ORDERS_PORT=4030
 METRICS_ORDERS_ADMIN_PORT=4031
+ECHO_PORT=4060
+CORS_API_PORT=4061
+OAUTH2_AUTH_PORT=4062
+OAUTH2_API_PORT=4063
 
 ALL_PORTS=(
   $GATEWAY_PORT
@@ -34,6 +38,8 @@ ALL_PORTS=(
   $RETRY_INVENTORY_PORT $RETRY_INVENTORY_ADMIN_PORT
   $CACHED_CATALOG_PORT
   $METRICS_ORDERS_PORT $METRICS_ORDERS_ADMIN_PORT
+  $ECHO_PORT $CORS_API_PORT
+  $OAUTH2_AUTH_PORT $OAUTH2_API_PORT
 )
 
 # ── Free ports ───────────────────────────────────────────────────────────────
@@ -57,6 +63,7 @@ cleanup() {
     "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" \
     "$CATALOG_A_PID" "$CATALOG_B_PID" "$CATALOG_C_PID" "$CHAT_PID" \
     "$RETRY_INVENTORY_PID" "$CACHED_CATALOG_PID" "$METRICS_ORDERS_PID" \
+    "$ECHO_PID" "$CORS_API_PID" "$OAUTH2_AUTH_PID" "$OAUTH2_API_PID" \
     "$GATEWAY_PID" \
     2>/dev/null || true
   wait \
@@ -64,6 +71,7 @@ cleanup() {
     "$PAYMENTS_PID" "$INVENTORY_PID" "$ANALYTICS_PID" \
     "$CATALOG_A_PID" "$CATALOG_B_PID" "$CATALOG_C_PID" "$CHAT_PID" \
     "$RETRY_INVENTORY_PID" "$CACHED_CATALOG_PID" "$METRICS_ORDERS_PID" \
+    "$ECHO_PID" "$CORS_API_PID" "$OAUTH2_AUTH_PID" "$OAUTH2_API_PID" \
     "$GATEWAY_PID" \
     2>/dev/null || true
   echo "Done."
@@ -120,6 +128,22 @@ CACHED_CATALOG_PID=$!
 ORDERS_PORT=$METRICS_ORDERS_PORT ORDERS_ADMIN_PORT=$METRICS_ORDERS_ADMIN_PORT \
   node "$ROOT/examples/metrics/upstream-orders.js" &
 METRICS_ORDERS_PID=$!
+
+ECHO_PORT=$ECHO_PORT \
+  node "$ROOT/examples/header-transform/upstream-echo.js" &
+ECHO_PID=$!
+
+API_PORT=$CORS_API_PORT \
+  node "$ROOT/examples/route-cors/upstream-api.js" &
+CORS_API_PID=$!
+
+AUTH_PORT=$OAUTH2_AUTH_PORT \
+  node "$ROOT/examples/oauth2/auth-server.js" &
+OAUTH2_AUTH_PID=$!
+
+API_PORT=$OAUTH2_API_PORT \
+  node "$ROOT/examples/oauth2/upstream-protected.js" &
+OAUTH2_API_PID=$!
 
 # ── Start gateway ────────────────────────────────────────────────────────────
 echo "Starting gateway..."
@@ -179,6 +203,18 @@ echo ""
 echo "  ── Prometheus metrics ─────────────────────────────────────────────"
 echo "  Metrics orders  →  http://localhost:$GATEWAY_PORT/metrics-orders   (cached, drives counters)"
 echo "  Orders admin    →  http://localhost:$METRICS_ORDERS_ADMIN_PORT      (toggle mode — not proxied)"
+echo ""
+echo "  ── Header transformation ──────────────────────────────────────────"
+echo "  Echo API        →  http://localhost:$GATEWAY_PORT/echo              (req + res header transforms)"
+echo ""
+echo "  ── Route-level CORS ───────────────────────────────────────────────"
+echo "  Public API      →  http://localhost:$GATEWAY_PORT/public-api        (global CORS: origin *)"
+echo "  Restricted API  →  http://localhost:$GATEWAY_PORT/restricted-api    (origin: trusted.example.com)"
+echo ""
+echo "  ── OAuth 2.0 token introspection ──────────────────────────────────"
+echo "  Auth login      →  http://localhost:$GATEWAY_PORT/oauth2-auth/login (issues opaque tokens)"
+echo "  Protected API   →  http://localhost:$GATEWAY_PORT/oauth2-protected   (Bearer token required)"
+echo "  Auth server     →  http://localhost:$OAUTH2_AUTH_PORT               (not proxied)"
 echo ""
 echo "─────────────────────────────────────────────────────────────────────"
 echo " Try it out"
@@ -315,6 +351,44 @@ echo "  # Restore"
 echo "  curl -s -X POST http://localhost:$METRICS_ORDERS_ADMIN_PORT/mode \\"
 echo "    -H 'Content-Type: application/json' \\"
 echo "    -d '{\"mode\":\"healthy\"}' | jq"
+echo ""
+echo "── Header transformation ──"
+echo "  # See gateway-injected request headers at the upstream"
+echo "  curl -s http://localhost:$GATEWAY_PORT/echo | jq '.receivedHeaders | { \"x-forwarded-by\", \"x-api-version\", \"user-agent\" }'"
+echo ""
+echo "  # Confirm response transforms: Server removed, X-Frame-Options added"
+echo "  curl -si http://localhost:$GATEWAY_PORT/echo | grep -E '^(Server|X-Frame-Options|X-Custom-Upstream):'"
+echo ""
+echo "── Route-level CORS ──"
+echo "  # Public API — global CORS (origin: *)"
+echo "  curl -si http://localhost:$GATEWAY_PORT/public-api | grep -i 'access-control-allow-origin'"
+echo ""
+echo "  # Restricted API — only trusted.example.com is allowed"
+echo "  curl -si http://localhost:$GATEWAY_PORT/restricted-api \\"
+echo "    -H 'Origin: http://trusted.example.com' | grep -i 'access-control'"
+echo ""
+echo "  # Preflight on restricted-api (204 handled by gateway)"
+echo "  curl -si -X OPTIONS http://localhost:$GATEWAY_PORT/restricted-api \\"
+echo "    -H 'Origin: http://trusted.example.com' \\"
+echo "    -H 'Access-Control-Request-Method: GET' | head -8"
+echo ""
+echo "── OAuth 2.0 token introspection ──"
+echo "  # 1. Try without a token (401)"
+echo "  curl -s http://localhost:$GATEWAY_PORT/oauth2-protected | jq"
+echo ""
+echo "  # 2. Log in to get an opaque token (users: alice/password123 · bob/password456)"
+echo "  TOKEN=\$(curl -s -X POST http://localhost:$GATEWAY_PORT/oauth2-auth/login \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"username\":\"alice\",\"password\":\"password123\"}' | jq -r '.access_token')"
+echo "  echo \"Token: \$TOKEN\""
+echo ""
+echo "  # 3. Access the protected route — gateway introspects the token"
+echo "  curl -s http://localhost:$GATEWAY_PORT/oauth2-protected \\"
+echo "    -H \"Authorization: Bearer \$TOKEN\" | jq"
+echo ""
+echo "  # 4. Forged token → 401"
+echo "  curl -s http://localhost:$GATEWAY_PORT/oauth2-protected \\"
+echo "    -H 'Authorization: Bearer tok_this_is_fake' | jq"
 echo ""
 echo "─────────────────────────────────────────────────────────────────────"
 echo ""
