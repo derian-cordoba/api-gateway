@@ -15,7 +15,7 @@ export class App {
   }
 
   /**
-   * Configure security headers using Helmet
+   * Stop the HTTP server
    */
   async stop(): Promise<void> {
     return await this.server.stop();

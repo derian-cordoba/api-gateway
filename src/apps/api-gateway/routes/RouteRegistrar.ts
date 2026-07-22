@@ -2,8 +2,8 @@ import type { Router } from "express";
 import type { Gateway } from "../types/gateway";
 import type { MiddlewareFactory } from "./middleware-factories/MiddlewareFactory";
 import type { ProxyBackendFactory } from "./proxy-backends/ProxyBackendFactory";
+import type { RouteRegistrationLogger } from "./RouteRegistrationLogger";
 import type { WsUpgradeHandler } from "./ProxyManager";
-import { logger } from "../logger";
 
 /**
  * Mounts a single route onto an Express router by running the route config
@@ -13,12 +13,16 @@ import { logger } from "../logger";
  * Each factory returns either a `RequestHandler` or `null` — `null` means
  * "nothing to contribute for this route" and is skipped cleanly without
  * mounting a no-op handler.
+ *
+ * Logging is delegated to `RouteRegistrationLogger` so this class stays
+ * focused on routing (Single Responsibility Principle).
  */
 export class RouteRegistrar {
   constructor(
     private readonly router: Router,
     private readonly middlewarePipeline: MiddlewareFactory[],
     private readonly backendFactory: ProxyBackendFactory,
+    private readonly registrationLogger: RouteRegistrationLogger,
   ) {}
 
   register(route: Gateway): WsUpgradeHandler | null {
@@ -31,35 +35,8 @@ export class RouteRegistrar {
     this.router.use(route.baseURL, backend.createMiddleware());
     const wsHandler = backend.wsUpgradeHandler();
 
-    if (route.retry) {
-      logger.info(
-        {
-          baseURL: route.baseURL,
-          targets: route.proxy.targets?.map((target) => target.url) ?? [route.proxy.target!],
-          retry: route.retry,
-          circuitBreaker: !!route.circuitBreaker,
-          timeout: route.proxy.timeout,
-        },
-        "Registered proxy route (retry enabled)",
-      );
-    } else {
-      logger.info(
-        {
-          baseURL: route.baseURL,
-          targets: route.proxy.targets?.map((target) => target.url) ?? [route.proxy.target!],
-          strategy: route.proxy.strategy ?? (route.proxy.targets ? "round-robin" : undefined),
-          circuitBreaker: !!route.circuitBreaker,
-          timeout: route.proxy.timeout,
-          ws: !!route.proxy.ws,
-          cache: !!route.cache,
-        },
-        "Registered proxy route",
-      );
-    }
-
-    if (wsHandler) {
-      logger.info({ baseURL: route.baseURL }, "WebSocket upgrade handler registered");
-    }
+    this.registrationLogger.logRegistration(route);
+    if (wsHandler) this.registrationLogger.logWebSocketHandler(route);
 
     return wsHandler;
   }

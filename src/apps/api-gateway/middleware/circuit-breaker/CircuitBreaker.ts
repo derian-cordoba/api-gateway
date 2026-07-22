@@ -1,4 +1,6 @@
 import type { CircuitBreakerConfig } from "../../types/circuit-breaker";
+import type { Clock } from "./Clock";
+import { SystemClock } from "./SystemClock";
 import { logger } from "../../logger";
 
 export enum CircuitState {
@@ -32,6 +34,7 @@ export class CircuitBreaker {
   constructor(
     private readonly config: CircuitBreakerConfig,
     private readonly baseURL: string,
+    private readonly clock: Clock = new SystemClock(),
   ) {
     //
   }
@@ -46,7 +49,7 @@ export class CircuitBreaker {
    */
   shouldReject(): boolean {
     if (this.state === CircuitState.OPEN) {
-      if (Date.now() < this.nextAttempt) {
+      if (this.clock.now() < this.nextAttempt) {
         return true;
       }
       // Timeout elapsed — transition to HALF_OPEN and allow one probe request.
@@ -72,7 +75,7 @@ export class CircuitBreaker {
    * Seconds until the circuit transitions to half-open. Only meaningful in OPEN state.
    */
   retryAfterSeconds(): number {
-    return Math.ceil(Math.max(0, this.nextAttempt - Date.now()) / 1000);
+    return Math.ceil(Math.max(0, this.nextAttempt - this.clock.now()) / 1000);
   }
 
   recordSuccess(): void {
@@ -95,7 +98,7 @@ export class CircuitBreaker {
 
     if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.config.threshold) {
       this.state = CircuitState.OPEN;
-      this.nextAttempt = Date.now() + this.config.timeout;
+      this.nextAttempt = this.clock.now() + this.config.timeout;
       this.failureCount = 0;
       this.successCount = 0;
       logger.warn(

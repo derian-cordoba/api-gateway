@@ -16,6 +16,7 @@ import { MetricsMiddlewareFactory } from "./middleware-factories/MetricsMiddlewa
 import { CacheMiddlewareFactory } from "./middleware-factories/CacheMiddlewareFactory";
 import { TimeoutMiddlewareFactory } from "./middleware-factories/TimeoutMiddlewareFactory";
 import { ProxyBackendFactory } from "./proxy-backends/ProxyBackendFactory";
+import { PinoRouteRegistrationLogger } from "./RouteRegistrationLogger";
 import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
@@ -48,6 +49,7 @@ export class ProxyManager {
         new TimeoutMiddlewareFactory(),
       ],
       new ProxyBackendFactory(circuitBreakerFactory),
+      new PinoRouteRegistrationLogger(),
     );
   }
 
