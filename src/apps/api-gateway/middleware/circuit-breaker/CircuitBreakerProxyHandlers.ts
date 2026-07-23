@@ -21,7 +21,7 @@ export class CircuitBreakerProxyHandlers {
   }
 
   readonly proxyRes = (proxyRes: IncomingMessage): void => {
-    if (proxyRes.statusCode && proxyRes.statusCode >= 500) {
+    if (proxyRes.statusCode && proxyRes.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.breaker.recordFailure();
     } else {
       this.breaker.recordSuccess();

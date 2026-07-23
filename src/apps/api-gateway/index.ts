@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-
-import { config } from "dotenv";
-config();
-
 import { App } from "./App";
 import { logger } from "./logger";
 

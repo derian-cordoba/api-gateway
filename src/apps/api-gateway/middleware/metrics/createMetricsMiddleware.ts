@@ -1,4 +1,5 @@
 import type { RequestHandler, Request, Response, NextFunction } from "express";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { MetricsCollector } from "./MetricsCollector";
 
 /**
@@ -22,7 +23,7 @@ export function createMetricsMiddleware(
       collector.requestsTotal.inc({ route, method: req.method, status_code: status });
       end();
 
-      if (res.statusCode >= 500) {
+      if (res.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
         collector.upstreamErrors.inc({ route, error_type: "upstream_error" });
       }
 
