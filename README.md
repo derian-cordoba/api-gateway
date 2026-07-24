@@ -50,7 +50,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
 - **Request ID propagation** — every request receives a `X-Request-ID` header (generated UUID v4 if absent, forwarded unchanged if already set); the same ID appears in the response header, every gateway log line, and the request forwarded to the upstream — enabling end-to-end request tracing with no external infrastructure
 - **IP allowlist / blocklist** — per-route IPv4 and CIDR-range filtering; deny list is evaluated first, allow list restricts access to specified addresses only; IPv4-mapped IPv6 addresses are normalised automatically
-- **Load balancing** — distribute traffic across multiple upstream targets with three strategies: `round-robin` (default), `weighted` (proportional weight per target), and `least-connections` (always forwards to the least-busy upstream); fully composable with auth, rate limiting, and the circuit breaker
+- **Load balancing** — distribute traffic across multiple upstream targets with four strategies: `round-robin` (default), `weighted` (proportional weight per target), `least-connections` (always forwards to the least-busy upstream), and `sticky` (session-affinity — routes a given client to the same upstream on every request); fully composable with auth, rate limiting, and the circuit breaker
 - **Per-route request timeout** — set `proxy.timeout` on any route to cap how long the gateway waits for an upstream response; slow upstreams receive a `504 Gateway Timeout` and the upstream connection is aborted
 - **WebSocket proxying** — enable `ws: true` on any route to proxy WebSocket upgrade requests transparently; all subsequent frames are tunnelled to the upstream without additional configuration
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
@@ -184,7 +184,7 @@ Exactly one of `target` or `targets` must be provided.
 | `target` | `string` | ✅ (or `targets`) | Single upstream URL. Mutually exclusive with `targets`. |
 | `targets` | `WeightedTarget[]` | ✅ (or `target`) | Two or more upstream URLs for load balancing. Mutually exclusive with `target`. |
 | `strategy` | `"round-robin" \| "weighted" \| "least-connections" \| "sticky"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
-| `stickyKey` | `string` | — | Key source for the `"sticky"` strategy. Format: `"cookie:<name>"` or `"header:<name>"`. Required when `strategy` is `"sticky"`. |
+| `stickyKey` | `string` | — | Key source for the `"sticky"` strategy. Accepted formats: `"ip"`, `"header:<name>"`, `"jwt:<claim>"`, `"cookie:<name>"`. Required when `strategy` is `"sticky"`. Defaults to `"header:X-Session-ID"`. |
 | `ws` | `boolean` | — | Enable WebSocket proxying for this route. |
 | `changeOrigin` | `boolean` | — | Rewrite the `Host` header to the target origin. |
 | `pathRewrite` | `{ [pattern]: replacement }` | — | Regex path rewrite rules applied before forwarding. |
@@ -217,6 +217,7 @@ Exactly one of `target` or `targets` must be provided.
 | `"ip"` | Client IP address (default). |
 | `"header:<name>"` | Value of the named request header (e.g. `"header:X-API-Key"`). |
 | `"jwt:<claim>"` | Claim extracted from the decoded JWT payload (e.g. `"jwt:sub"`). Falls back to IP when the token or claim is absent. |
+| `"cookie:<name>"` | Value of the named cookie (e.g. `"cookie:session_id"`). Requires `cookie-parser` to be mounted. Falls back to IP when the cookie is absent. |
 
 Responses include standard `RateLimit-*` headers (RFC draft-8).
 
@@ -802,6 +803,7 @@ Distribute traffic across multiple upstream instances by replacing the single `p
 | `round-robin` (default) | Cycles through targets in order: A → B → C → A → … |
 | `weighted` | Each target carries traffic proportional to its `weight`. A target with `weight: 2` receives twice as many requests as one with `weight: 1`. The cycle is deterministic (not random). |
 | `least-connections` | Always forwards to the target with the fewest active connections. Best for routes where upstream processing time varies significantly. |
+| `sticky` | Routes a given client to the same upstream on every request (session affinity). The client is identified by the `stickyKey` spec (`"ip"`, `"header:<name>"`, `"jwt:<claim>"`, or `"cookie:<name>"`). On first contact the target is chosen by round-robin and stored in-process; subsequent requests from the same client always go to that target. Mappings are in-process only and reset on gateway restart. |
 
 ### Configuration
 
@@ -854,6 +856,34 @@ Distribute traffic across multiple upstream instances by replacing the single `p
   }
 }
 ```
+
+**Sticky sessions (session affinity):**
+
+```json
+{
+  "baseURL": "/checkout",
+  "proxy": {
+    "targets": [
+      { "url": "http://checkout-a:3001" },
+      { "url": "http://checkout-b:3002" }
+    ],
+    "strategy": "sticky",
+    "stickyKey": "cookie:session_id",
+    "changeOrigin": true
+  }
+}
+```
+
+`stickyKey` accepts four formats:
+
+| Format | Example | Behaviour |
+|---|---|---|
+| `"ip"` | `"ip"` | Client IP address. |
+| `"header:<name>"` | `"header:X-Session-ID"` | Value of the named request header. Default when `stickyKey` is omitted. |
+| `"jwt:<claim>"` | `"jwt:sub"` | Claim extracted from the decoded JWT Bearer token. |
+| `"cookie:<name>"` | `"cookie:session_id"` | Value of the named cookie. |
+
+When the key source is absent (no cookie, no header, anonymous request) the gateway falls back to round-robin for that single request and pins the chosen target if a key becomes available on subsequent calls.
 
 ### Composing with other features
 
@@ -1429,10 +1459,12 @@ src/apps/api-gateway/
 │
 ├── config/
 │   ├── app-env.ts            # Aggregates all config modules into a single AppEnv object
+│   ├── EnvParser.ts          # Stateless helpers for parsing env-variable strings into typed values
 │   ├── env/config.ts         # NODE_ENV → isDev flag
 │   ├── gateway/config.ts     # GATEWAY_PORT, GATEWAY_PREFIX
 │   ├── cors/config.ts        # CORS_ORIGINS, CORS_METHODS, CORS_HEADERS
 │   ├── routes/config.ts      # ROUTES_FILE_PATH
+│   ├── proxy/config.ts       # Tunable proxy defaults (histogram buckets, debounce, backoff, etc.)
 │   └── auth/config.ts        # JWT_SECRET, JWT_PUBLIC_KEY
 │
 ├── middleware/
@@ -1445,16 +1477,40 @@ src/apps/api-gateway/
 │   │   ├── JwtAuthStrategy.ts      # JWT Bearer token validation (HMAC + RSA/EC)
 │   │   ├── ApiKeyAuthStrategy.ts   # Header-based API key validation
 │   │   ├── BasicAuthStrategy.ts    # HTTP Basic Auth with timing-safe credential check
-│   │   └── OAuth2AuthStrategy.ts   # OAuth 2.0 token introspection (RFC 7662)
+│   │   └── OAuth2AuthStrategy.ts   # OAuth 2.0 token introspection (RFC 7662); injectable CacheStore
 │   ├── circuit-breaker/
-│   │   ├── CircuitBreaker.ts             # Three-state machine (CLOSED / OPEN / HALF-OPEN)
-│   │   └── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
+│   │   ├── CircuitBreaker.ts              # Three-state machine (CLOSED / OPEN / HALF-OPEN)
+│   │   ├── CircuitBreakerProxyHandlers.ts # Proxy event handlers — records success/failure
+│   │   ├── CircuitBreakerStateStore.ts    # Interface for pluggable state persistence
+│   │   ├── InMemoryStateStore.ts          # Default in-process state store
+│   │   ├── HealthProber.ts                # Active health-check probe (setInterval, unref'd)
+│   │   ├── Clock.ts                       # Interface for time abstraction (DIP)
+│   │   └── SystemClock.ts                 # Default Clock implementation (Date.now())
+│   ├── key-extractors/
+│   │   ├── RequestKeyExtractor.ts         # Interface — extract a string key from a request
+│   │   ├── RequestKeyExtractorFactory.ts  # Parses "ip" / "header:<n>" / "jwt:<c>" / "cookie:<n>" specs
+│   │   ├── IpKeyExtractor.ts              # Extracts req.ip
+│   │   ├── HeaderKeyExtractor.ts          # Extracts a named request header
+│   │   ├── JwtClaimKeyExtractor.ts        # Decodes Bearer JWT and extracts a claim
+│   │   └── CookieKeyExtractor.ts          # Extracts a named cookie value
 │   ├── load-balancer/
-│   │   └── LoadBalancer.ts         # Round-robin, weighted, and least-connections strategies
+│   │   ├── LoadBalancer.ts                # Orchestrator — delegates to SelectionStrategy
+│   │   ├── SelectionStrategy.ts           # Interface for pluggable target-selection algorithms
+│   │   ├── RoundRobinSelectionStrategy.ts # Cycles through targets in order
+│   │   ├── WeightedSelectionStrategy.ts   # Pre-expands targets by weight, delegates to round-robin
+│   │   ├── LeastConnectionsSelectionStrategy.ts # Tracks active connections per target
+│   │   └── StickySelectionStrategy.ts     # Session affinity via RequestKeyExtractor
 │   ├── retry/
-│   │   └── RetryProxyMiddleware.ts # Node http/https retry proxy with fixed/exponential backoff
+│   │   ├── BodySerializer.ts       # Serializes request body to Buffer
+│   │   ├── UpstreamHttpClient.ts   # Interface + Node http/https implementation
+│   │   ├── HopByHopHeaderFilter.ts # Strips hop-by-hop headers from upstream responses
+│   │   ├── TargetSelector.ts       # Interface + single-target and load-balanced implementations
+│   │   ├── RetryExhaustedException.ts # Typed error thrown when all attempts fail
+│   │   └── RetryExecutor.ts        # Pure retry loop — no Express dependency
 │   ├── cache/
-│   │   ├── ResponseCache.ts        # In-memory TTL cache (Map-based, per-route)
+│   │   ├── CacheStore.ts           # Generic interface CacheStore<T extends { expiresAt: number }>
+│   │   ├── MemoryCacheStore.ts     # Default in-process Map-backed implementation
+│   │   ├── ResponseCache.ts        # Cache policy (TTL, methods, status codes) + CacheStore<CacheEntry>
 │   │   └── createCacheMiddleware.ts # Express middleware — serves HITs, intercepts MISSes
 │   └── metrics/
 │       ├── MetricsCollector.ts     # prom-client wrapper with isolated Registry
@@ -1464,9 +1520,14 @@ src/apps/api-gateway/
 │   ├── Router.ts             # Middleware pipeline (logging → security → CORS → body → proxy → errors)
 │   ├── RouteReloader.ts      # Hot-reload — watches routes file, swaps inner router on change
 │   ├── ProxyManager.ts       # Reads, validates, and registers proxy routes
+│   ├── RouteRegistrar.ts     # Mounts per-route middleware stack onto the Express router
+│   ├── RouteRegistrationLogger.ts # Interface + Pino implementation for route-registration logs
 │   ├── RouteValidator.ts     # Validates route config and delegates to schema modules
 │   ├── HealthRouter.ts       # GET /health handler
 │   ├── MetricsRouter.ts      # GET /metrics handler (Prometheus text format)
+│   ├── proxy-backends/       # RetryProxyBackend, SimpleProxyBackend — one class per proxy mode
+│   ├── proxy-event-plugins/  # ProxyPlugin interface + per-concern implementations (headers, CB, metrics, cache)
+│   ├── middleware-factories/  # MiddlewareFactory interface + per-concern factories (auth, rate-limit, …)
 │   └── validators/           # One Zod schema per domain
 │       ├── proxy.schema.ts
 │       ├── rate-limit.schema.ts
@@ -1790,11 +1851,10 @@ To wire it in, extend `authMiddleware.ts` and add a new `strategy` literal to th
 By default the response cache uses `MemoryCacheStore` (in-process Map). To share cached responses across multiple gateway instances, implement `CacheStore`:
 
 ```ts
-import type { CacheStore } from "@derian-cordoba/api-gateway";
-import type { CacheEntry } from "@derian-cordoba/api-gateway";
+import type { CacheStore, CacheEntry } from "@derian-cordoba/api-gateway";
 import { createClient } from "redis";
 
-export class RedisCacheStore implements CacheStore {
+export class RedisCacheStore implements CacheStore<CacheEntry> {
   constructor(private readonly client: ReturnType<typeof createClient>) {}
 
   get(key: string): CacheEntry | null {
