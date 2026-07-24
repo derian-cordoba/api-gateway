@@ -1,4 +1,4 @@
-export type BalancerStrategy = "round-robin" | "weighted" | "least-connections";
+export type BalancerStrategy = "round-robin" | "weighted" | "least-connections" | "sticky";
 
 export type WeightedTarget = {
   /**

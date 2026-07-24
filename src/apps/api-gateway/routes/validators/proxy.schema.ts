@@ -5,7 +5,7 @@ const WeightedTargetSchema = z.object({
   weight: z.number().int().positive("Target weight must be a positive integer").optional(),
 });
 
-const BalancerStrategySchema = z.enum(["round-robin", "weighted", "least-connections"]);
+const BalancerStrategySchema = z.enum(["round-robin", "weighted", "least-connections", "sticky"]);
 
 export const ProxySchema = z
   .object({
@@ -15,11 +15,20 @@ export const ProxySchema = z
       .min(2, "Load balancer requires at least two targets")
       .optional(),
     strategy: BalancerStrategySchema.optional(),
+    stickyKey: z
+      .string()
+      .regex(
+        /^(cookie|header):[^:]+$/,
+        'stickyKey must be "cookie:<name>" or "header:<name>"',
+      )
+      .optional(),
     isSecure: z.boolean().optional(),
     changeOrigin: z.boolean().optional(),
     pathRewrite: z.record(z.string(), z.string()).optional(),
     headers: z.record(z.string(), z.string()).optional(),
-    method: z.string().optional(),
+    method: z
+      .enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+      .optional(),
     timeout: z.number().positive("Proxy timeout must be a positive number").optional(),
     ws: z.boolean().optional(),
   })
@@ -30,4 +39,12 @@ export const ProxySchema = z
   .refine((d) => d.strategy === undefined || d.targets !== undefined, {
     message: "strategy is only valid when targets is set",
     path: ["strategy"],
+  })
+  .refine((d) => d.stickyKey === undefined || d.strategy === "sticky", {
+    message: 'stickyKey is only valid when strategy is "sticky"',
+    path: ["stickyKey"],
+  })
+  .refine((d) => d.strategy !== "sticky" || d.stickyKey !== undefined, {
+    message: 'strategy "sticky" requires stickyKey to be set',
+    path: ["stickyKey"],
   });

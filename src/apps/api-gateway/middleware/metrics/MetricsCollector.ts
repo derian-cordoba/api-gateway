@@ -1,4 +1,5 @@
 import { Registry, Counter, Histogram } from "prom-client";
+import { appEnv } from "../../config/app-env";
 
 export class MetricsCollector {
   readonly registry: Registry;
@@ -22,7 +23,7 @@ export class MetricsCollector {
       name: "gateway_request_duration_seconds",
       help: "Duration of gateway requests in seconds",
       labelNames: ["route", "method"],
-      buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+      buckets: appEnv.proxy.metricsHistogramBuckets,
       registers: [this.registry],
     });
 

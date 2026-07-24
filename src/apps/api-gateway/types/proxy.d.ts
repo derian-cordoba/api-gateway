@@ -23,6 +23,16 @@ export declare type Proxy = {
   strategy?: BalancerStrategy;
 
   /**
+   * Key source used by the "sticky" strategy to derive a session identifier.
+   *
+   * - `"cookie:<name>"` — a request cookie (e.g. `"cookie:JSESSIONID"`)
+   * - `"header:<name>"` — a request header (e.g. `"header:X-Session-ID"`)
+   *
+   * Only valid when `strategy` is `"sticky"`.
+   */
+  stickyKey?: string;
+
+  /**
    * Determine if the proxy route should be secure.
    */
   isSecure?: boolean;

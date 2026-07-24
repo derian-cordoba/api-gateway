@@ -12,7 +12,7 @@ export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buff
 
 export class RouteReloader {
   private readonly reloadBound = () => void this.reload();
-  private readonly DEBOUNCE_MS = 300;
+  private readonly DEBOUNCE_MS = appEnv.proxy.routesDebounceMs;
 
   private innerRouter: ExpressRouter = ExpressRouter();
   private activeWsHandlers: WsUpgradeHandler[] = [];

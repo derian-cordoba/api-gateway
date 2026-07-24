@@ -5,6 +5,7 @@ import type { CircuitBreaker } from "../circuit-breaker/CircuitBreaker";
 import type { UpstreamHttpClient, UpstreamResponse } from "./UpstreamHttpClient";
 import type { TargetSelector } from "./TargetSelector";
 import { RetryExhaustedException } from "./RetryExhaustedException";
+import { appEnv } from "../../config/app-env";
 import { logger } from "../../logger";
 
 /**
@@ -87,12 +88,15 @@ export class RetryExecutor {
   // ── Private helpers ───────────────────────────────────────────────────────
 
   private isRetryable(statusCode: number): boolean {
+    if (this.config.retryOn) {
+      return this.config.retryOn.includes(statusCode);
+    }
     return statusCode >= HttpStatus.INTERNAL_SERVER_ERROR;
   }
 
   private computeDelay(attemptIndex: number): number {
     if (this.config.backoff === "exponential") {
-      return this.config.delay * Math.pow(2, attemptIndex);
+      return this.config.delay * Math.pow(appEnv.proxy.retryBackoffMultiplier, attemptIndex);
     }
     return this.config.delay;
   }

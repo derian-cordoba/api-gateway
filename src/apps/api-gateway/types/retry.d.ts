@@ -20,4 +20,12 @@ export declare type RetryConfig = {
    * @default "fixed"
    */
   backoff?: RetryBackoff;
+
+  /**
+   * Explicit list of HTTP status codes that should trigger a retry.
+   * When omitted, all 5xx responses are retried (default behaviour).
+   *
+   * @example [500, 502, 503, 504]
+   */
+  retryOn?: number[];
 };

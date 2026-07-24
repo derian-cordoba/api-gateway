@@ -20,7 +20,11 @@ export class ProxyBackendFactory {
   create(route: Gateway): ProxyBackend {
     const breaker = this.circuitBreakerFactory.getBreaker(route);
     const balancer = route.proxy.targets
-      ? new LoadBalancer(route.proxy.targets, route.proxy.strategy ?? "round-robin")
+      ? new LoadBalancer(
+          route.proxy.targets,
+          route.proxy.strategy ?? "round-robin",
+          route.proxy.stickyKey,
+        )
       : null;
 
     if (route.retry) {

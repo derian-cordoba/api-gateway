@@ -23,8 +23,8 @@ export class WeightedSelectionStrategy implements SelectionStrategy {
     this.inner = new RoundRobinSelectionStrategy(expanded);
   }
 
-  pick(): string {
-    return this.inner.pick();
+  pick(req: object): string {
+    return this.inner.pick(req);
   }
 
   trackRequest(_req: object, _url: string): void {

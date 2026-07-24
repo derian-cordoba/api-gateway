@@ -14,7 +14,7 @@ export class LeastConnectionsSelectionStrategy implements SelectionStrategy {
     this.connectionCount = new Map(urls.map((url) => [url, 0]));
   }
 
-  pick(): string {
+  pick(_req: object): string {
     let minCount = Infinity;
     let chosen = this.urls[0];
 

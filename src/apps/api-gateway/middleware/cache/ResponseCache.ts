@@ -1,5 +1,6 @@
-const DEFAULT_METHODS = ["GET", "HEAD"];
-const DEFAULT_STATUS_CODES = [200, 203, 204];
+import type { CacheStore } from "./CacheStore";
+import { MemoryCacheStore } from "./MemoryCacheStore";
+import { appEnv } from "../../config/app-env";
 
 export type CacheEntry = {
   status: number;
@@ -12,18 +13,30 @@ export type CacheOptions = {
   ttl: number;
   methods?: string[];
   statusCodes?: number[];
+  /** Injectable storage backend. Defaults to `MemoryCacheStore`. */
+  store?: CacheStore<CacheEntry>;
 };
 
+/**
+ * Coordinates cache policy (TTL, cacheable methods/status-codes) and delegates
+ * storage to a pluggable `CacheStore`.
+ *
+ * The storage backend is separated so callers can swap in a Redis- or
+ * Memcached-backed implementation without changing any consumer code.
+ */
 export class ResponseCache {
-  private readonly store = new Map<string, CacheEntry>();
   private readonly ttl: number;
   private readonly methods: Set<string>;
   private readonly statusCodes: Set<number>;
+  private readonly store: CacheStore<CacheEntry>;
 
   constructor(options: CacheOptions) {
     this.ttl = options.ttl;
-    this.methods = new Set((options.methods ?? DEFAULT_METHODS).map((method) => method.toUpperCase()));
-    this.statusCodes = new Set(options.statusCodes ?? DEFAULT_STATUS_CODES);
+    this.methods = new Set(
+      (options.methods ?? appEnv.proxy.cacheDefaultMethods).map((method) => method.toUpperCase()),
+    );
+    this.statusCodes = new Set(options.statusCodes ?? appEnv.proxy.cacheDefaultStatusCodes);
+    this.store = options.store ?? new MemoryCacheStore();
   }
 
   isCacheable(method: string, statusCode: number): boolean {
@@ -31,13 +44,7 @@ export class ResponseCache {
   }
 
   get(key: string): CacheEntry | null {
-    const entry = this.store.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expiresAt) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry;
+    return this.store.get(key);
   }
 
   set(key: string, entry: Omit<CacheEntry, "expiresAt">): void {
@@ -46,12 +53,7 @@ export class ResponseCache {
 
   /** Returns the number of currently valid (non-expired) entries. */
   size(): number {
-    const now = Date.now();
-    let count = 0;
-    for (const entry of this.store.values()) {
-      if (entry.expiresAt > now) count++;
-    }
-    return count;
+    return this.store.size();
   }
 
   clear(): void {

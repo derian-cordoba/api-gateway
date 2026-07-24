@@ -5,8 +5,8 @@
  * LoadBalancer orchestrator.
  */
 export interface SelectionStrategy {
-  /** Pick the next upstream URL. */
-  pick(): string;
+  /** Pick the next upstream URL for the given request. */
+  pick(req: object): string;
 
   /**
    * Associate the chosen URL with a request object so that

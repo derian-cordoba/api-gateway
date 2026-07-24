@@ -3,6 +3,8 @@ import type { SelectionStrategy } from "./SelectionStrategy";
 import { RoundRobinSelectionStrategy } from "./RoundRobinSelectionStrategy";
 import { WeightedSelectionStrategy } from "./WeightedSelectionStrategy";
 import { LeastConnectionsSelectionStrategy } from "./LeastConnectionsSelectionStrategy";
+import { StickySelectionStrategy } from "./StickySelectionStrategy";
+import { RequestKeyExtractorFactory } from "../key-extractors/RequestKeyExtractorFactory";
 
 /**
  * Orchestrates upstream target selection by delegating all picking and
@@ -16,9 +18,13 @@ export class LoadBalancer {
   public readonly strategy: BalancerStrategy;
   private readonly selectionStrategy: SelectionStrategy;
 
-  constructor(targets: readonly WeightedTarget[], strategy: BalancerStrategy) {
+  constructor(
+    targets: readonly WeightedTarget[],
+    strategy: BalancerStrategy,
+    stickyKey?: string,
+  ) {
     this.strategy = strategy;
-    this.selectionStrategy = LoadBalancer.buildStrategy(targets, strategy);
+    this.selectionStrategy = LoadBalancer.buildStrategy(targets, strategy, stickyKey);
   }
 
   createRouterFn(): (req: object) => string {
@@ -30,7 +36,7 @@ export class LoadBalancer {
    * the association so `onConnectionClosed` can decrement the connection count.
    */
   selectTarget(req: object): string {
-    const url = this.selectionStrategy.pick();
+    const url = this.selectionStrategy.pick(req);
     this.selectionStrategy.trackRequest(req, url);
     return url;
   }
@@ -48,12 +54,18 @@ export class LoadBalancer {
   private static buildStrategy(
     targets: readonly WeightedTarget[],
     strategy: BalancerStrategy,
+    stickyKey?: string,
   ): SelectionStrategy {
     switch (strategy) {
       case "weighted":
         return new WeightedSelectionStrategy(targets);
       case "least-connections":
         return new LeastConnectionsSelectionStrategy(targets.map((target) => target.url));
+      case "sticky":
+        return new StickySelectionStrategy(
+          targets.map((target) => target.url),
+          RequestKeyExtractorFactory.fromSpec(stickyKey ?? "header:X-Session-ID"),
+        );
       case "round-robin":
       default:
         return new RoundRobinSelectionStrategy(targets.map((target) => target.url));

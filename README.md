@@ -34,6 +34,11 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - [Project Structure](#project-structure)
 - [Example Projects](#example-projects)
 - [Architecture](#architecture)
+- [Guides](#guides)
+  - [Custom Auth Strategy](#custom-auth-strategy)
+  - [Pluggable Cache Backend](#pluggable-cache-backend)
+  - [Distributed Circuit Breaker](#distributed-circuit-breaker)
+  - [Deployment](#deployment)
 
 ---
 
@@ -136,6 +141,19 @@ Copy `.env.example` to `.env` and edit as needed.
 | `JWT_SECRET` | _(none)_ | Fallback HMAC signing secret used when a JWT route has no inline `secret` field. |
 | `JWT_PUBLIC_KEY` | _(none)_ | Fallback PEM public key used when a JWT route has no inline `publicKey` field. Takes precedence over `JWT_SECRET`. |
 
+#### Tunable proxy defaults
+
+These variables override hardcoded defaults without requiring route-level configuration changes.
+
+| Variable | Default | Description |
+|---|---|---|
+| `METRICS_HISTOGRAM_BUCKETS` | `0.005,0.01,...,10` | Comma-separated histogram bucket boundaries (seconds) for `gateway_request_duration_seconds`. |
+| `ROUTES_DEBOUNCE_MS` | `300` | Milliseconds to debounce file-watcher events before reloading routes. |
+| `RETRY_BACKOFF_MULTIPLIER` | `2` | Base multiplier for exponential backoff (`delay × multiplier^attempt`). |
+| `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | `1` | Default `successThreshold` applied when not set in a route's `circuitBreaker` block. |
+| `CACHE_DEFAULT_METHODS` | `GET,HEAD` | Comma-separated HTTP methods cached when a route's `cache` block omits `methods`. |
+| `CACHE_DEFAULT_STATUS_CODES` | `200,203,204` | Comma-separated status codes cached when a route's `cache` block omits `statusCodes`. |
+
 ---
 
 ### Route Configuration
@@ -165,7 +183,8 @@ Exactly one of `target` or `targets` must be provided.
 |---|---|---|---|
 | `target` | `string` | ✅ (or `targets`) | Single upstream URL. Mutually exclusive with `targets`. |
 | `targets` | `WeightedTarget[]` | ✅ (or `target`) | Two or more upstream URLs for load balancing. Mutually exclusive with `target`. |
-| `strategy` | `"round-robin" \| "weighted" \| "least-connections"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
+| `strategy` | `"round-robin" \| "weighted" \| "least-connections" \| "sticky"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
+| `stickyKey` | `string` | — | Key source for the `"sticky"` strategy. Format: `"cookie:<name>"` or `"header:<name>"`. Required when `strategy` is `"sticky"`. |
 | `ws` | `boolean` | — | Enable WebSocket proxying for this route. |
 | `changeOrigin` | `boolean` | — | Rewrite the `Host` header to the target origin. |
 | `pathRewrite` | `{ [pattern]: replacement }` | — | Regex path rewrite rules applied before forwarding. |
@@ -187,8 +206,17 @@ Exactly one of `target` or `targets` must be provided.
 |---|---|---|---|
 | `max` | `number` | ✅ | Maximum number of requests allowed per window. |
 | `windowMs` | `number` | ✅ | Time window in milliseconds. |
-| `statusCode` | `number` | — | HTTP status returned when the limit is exceeded (default: `429`). |
+| `statusCode` | `number (400–599)` | — | HTTP status returned when the limit is exceeded (default: `429`). |
 | `message` | `string` | — | Response message when the limit is exceeded (default: `"Too many requests"`). |
+| `keyBy` | `string` | — | Key-derivation strategy for rate-limit bucketing (see table below). Defaults to client IP. |
+
+**`keyBy` values**
+
+| Value | Description |
+|---|---|
+| `"ip"` | Client IP address (default). |
+| `"header:<name>"` | Value of the named request header (e.g. `"header:X-API-Key"`). |
+| `"jwt:<claim>"` | Claim extracted from the decoded JWT payload (e.g. `"jwt:sub"`). Falls back to IP when the token or claim is absent. |
 
 Responses include standard `RateLimit-*` headers (RFC draft-8).
 
@@ -235,6 +263,15 @@ Stops forwarding requests to a failing upstream after a configurable number of c
 | `threshold` | `number` | ✅ | Consecutive failures before the circuit opens. Must be a positive integer. |
 | `timeout` | `number` | ✅ | Milliseconds the circuit stays open before transitioning to half-open and sending a probe request. |
 | `successThreshold` | `number` | — | Consecutive probe successes required to close the circuit (default: `1`). |
+| `healthCheck` | `HealthCheck` | — | Active health-check probe that pings a URL while the circuit is open to accelerate recovery. |
+
+**`HealthCheck`**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | `string` | ✅ | URL to probe with `GET`. A 2xx response counts as a success. |
+| `intervalMs` | `number` | ✅ | Milliseconds between probes. |
+| `timeoutMs` | `number` | — | Timeout for each probe request in milliseconds (default: `5000`). |
 
 #### `IpFilter`
 
@@ -253,9 +290,10 @@ Automatically retries failed upstream requests (5xx responses or network errors)
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `attempts` | `number` | ✅ | Maximum number of retry attempts after the first failure. Must be at least `1`. |
+| `attempts` | `number (1–10)` | ✅ | Maximum number of retry attempts after the first failure. |
 | `delay` | `number` | ✅ | Base delay in milliseconds between retries. |
-| `backoff` | `"fixed" \| "exponential"` | — | Backoff strategy. `"fixed"` waits `delay` ms every time. `"exponential"` doubles the wait on each attempt (`delay × 2^n`). Defaults to `"fixed"`. |
+| `backoff` | `"fixed" \| "exponential"` | — | Backoff strategy. `"fixed"` waits `delay` ms every time. `"exponential"` multiplies the wait on each attempt (`delay × multiplier^n`). Defaults to `"fixed"`. |
+| `retryOn` | `number[]` | — | Explicit list of HTTP status codes that should trigger a retry (e.g. `[500, 502, 503]`). When omitted, all 5xx responses are retried. Each code must be in the 400–599 range. |
 
 #### `Cache`
 
@@ -574,6 +612,7 @@ Validate opaque Bearer tokens by calling an RFC 7662 token introspection endpoin
 | `clientId` | `string` | ✅ | Client ID used for HTTP Basic auth against the introspection endpoint. |
 | `clientSecret` | `string` | ✅ | Client secret used for HTTP Basic auth against the introspection endpoint. |
 | `tokenTypeHint` | `string` | — | `token_type_hint` parameter sent with the introspection request (default: `"access_token"`). |
+| `introspectionCacheTtlMs` | `number` | — | When set, successful (`active: true`) introspection results are cached for this many milliseconds, reducing round-trips for high-traffic routes. Inactive tokens are never cached so revocations take effect immediately. |
 
 **How it works:**
 
@@ -598,7 +637,7 @@ curl http://localhost:3000/protected \
   -H "Authorization: Bearer fake-token"
 ```
 
-> **Note:** The gateway calls the introspection endpoint on every request. For high-traffic routes, consider fronting the introspection endpoint with a short-lived cache in your auth server to avoid becoming a bottleneck.
+> **Tip:** Use `introspectionCacheTtlMs` to avoid hammering your auth server on high-traffic routes. Set it to a value shorter than your token expiry (e.g. 60 seconds) to keep revocation lag acceptable.
 
 ---
 
@@ -1713,3 +1752,186 @@ ROUTES (env var JSON array)   ──┘
 ```
 
 If either source is missing or contains invalid JSON it is skipped with a warning. If the merged result fails Zod validation, the process exits with a descriptive error.
+
+---
+
+## Guides
+
+### Custom Auth Strategy
+
+The gateway ships four built-in auth strategies (`jwt`, `apiKey`, `basicAuth`, `oauth2`). To add a fifth without forking the gateway, use it as a library:
+
+```ts
+import { Server } from "@derian-cordoba/api-gateway";
+import type { AuthStrategy } from "@derian-cordoba/api-gateway";
+import type { Request, Response, NextFunction } from "express";
+
+// 1. Implement the AuthStrategy interface
+class HmacAuthStrategy implements AuthStrategy {
+  constructor(private readonly secret: string) {}
+
+  handle(req: Request, res: Response, next: NextFunction): void {
+    const sig = req.headers["x-signature"] as string;
+    if (sig !== computeHmac(req, this.secret)) {
+      res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+    next();
+  }
+}
+```
+
+To wire it in, extend `authMiddleware.ts` and add a new `strategy` literal to the discriminated union in `auth.d.ts` and the Zod schema.
+
+---
+
+### Pluggable Cache Backend
+
+By default the response cache uses `MemoryCacheStore` (in-process Map). To share cached responses across multiple gateway instances, implement `CacheStore`:
+
+```ts
+import type { CacheStore } from "@derian-cordoba/api-gateway";
+import type { CacheEntry } from "@derian-cordoba/api-gateway";
+import { createClient } from "redis";
+
+export class RedisCacheStore implements CacheStore {
+  constructor(private readonly client: ReturnType<typeof createClient>) {}
+
+  get(key: string): CacheEntry | null {
+    // Redis calls must be sync in this interface — consider
+    // a synchronous adapter or an async-aware cache layer.
+    throw new Error("Use async get via a caching proxy");
+  }
+
+  set(key: string, entry: CacheEntry): void {
+    void this.client.set(key, JSON.stringify(entry), {
+      PX: entry.expiresAt - Date.now(),
+    });
+  }
+
+  clear(): void {
+    void this.client.flushDb();
+  }
+
+  size(): number {
+    return 0; // approximate
+  }
+}
+```
+
+Inject it when constructing `ResponseCache`:
+
+```ts
+import { ResponseCache } from "@derian-cordoba/api-gateway";
+
+const cache = new ResponseCache({ ttl: 60_000, store: new RedisCacheStore(redisClient) });
+```
+
+---
+
+### Distributed Circuit Breaker
+
+The `CircuitBreakerStateStore` interface allows sharing circuit-breaker state across gateway replicas:
+
+```ts
+import type { CircuitBreakerStateStore, CircuitBreakerSnapshot } from "@derian-cordoba/api-gateway";
+import { CircuitState } from "@derian-cordoba/api-gateway";
+
+export class RedisStateStore implements CircuitBreakerStateStore {
+  constructor(private readonly client: ReturnType<typeof createClient>) {}
+
+  load(key: string): CircuitBreakerSnapshot | null {
+    const raw = this.client.get(key);  // sync client
+    if (!raw) return null;
+    return JSON.parse(raw) as CircuitBreakerSnapshot;
+  }
+
+  save(key: string, snapshot: CircuitBreakerSnapshot): void {
+    void this.client.set(key, JSON.stringify(snapshot));
+  }
+}
+```
+
+Pass the store to `CircuitBreaker`:
+
+```ts
+import { CircuitBreaker } from "@derian-cordoba/api-gateway";
+
+const breaker = new CircuitBreaker(config, baseURL, clock, new RedisStateStore(client));
+```
+
+---
+
+### Deployment
+
+#### Docker (recommended)
+
+```dockerfile
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN npm i -g pnpm && pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json .
+
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+ENV NODE_ENV=production
+CMD ["node", "dist/src/apps/api-gateway/index.js"]
+```
+
+#### Kubernetes liveness / readiness probes
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+#### Injecting routes at runtime
+
+Pass the route config as a JSON string via the `ROUTES` environment variable instead of mounting a file:
+
+```yaml
+env:
+  - name: ROUTES
+    value: |
+      [
+        {
+          "baseURL": "/api",
+          "proxy": { "target": "http://backend-service:8080", "changeOrigin": true }
+        }
+      ]
+  - name: NODE_ENV
+    value: production
+  - name: LOG_LEVEL
+    value: info
+```
+
+#### Hot-reload in production
+
+Send `SIGHUP` to the gateway process to reload routes without downtime:
+
+```bash
+kill -HUP $(pgrep -f "api-gateway")
+```
+
+In Kubernetes, use `kubectl exec` to send the signal, or update the `ROUTES` env var and trigger a rolling restart.

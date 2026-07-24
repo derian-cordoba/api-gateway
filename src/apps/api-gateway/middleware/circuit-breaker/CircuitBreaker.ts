@@ -1,6 +1,9 @@
 import type { CircuitBreakerConfig } from "../../types/circuit-breaker";
 import type { Clock } from "./Clock";
+import type { CircuitBreakerStateStore } from "./CircuitBreakerStateStore";
 import { SystemClock } from "./SystemClock";
+import { InMemoryStateStore } from "./InMemoryStateStore";
+import { appEnv } from "../../config/app-env";
 import { logger } from "../../logger";
 
 export enum CircuitState {
@@ -10,7 +13,7 @@ export enum CircuitState {
 }
 
 /**
- * In-memory circuit breaker implementing the three-state pattern:
+ * Circuit breaker implementing the three-state pattern:
  *
  * CLOSED   → normal operation; failures are counted
  * OPEN     → upstream is failing; requests are rejected immediately (503)
@@ -21,22 +24,32 @@ export enum CircuitState {
  *  OPEN    → HALF_OPEN when timeout has elapsed
  *  HALF_OPEN → CLOSED  when successCount >= successThreshold
  *  HALF_OPEN → OPEN    on any failure (probe failed)
+ *
+ * State is persisted through the injected `CircuitBreakerStateStore`, allowing
+ * external backends (e.g. Redis) to share state across gateway instances.
  */
 export class CircuitBreaker {
-  private state = CircuitState.CLOSED;
-  private failureCount = 0;
-  private successCount = 0;
-  private nextAttempt = 0;
-  
+  private state: CircuitState;
+  private failureCount: number;
+  private successCount: number;
+  private nextAttempt: number;
+
   // True while a probe request is in flight during HALF_OPEN state.
+  // This is intentionally NOT persisted — it is per-process, ephemeral state.
   private probing = false;
 
   constructor(
     private readonly config: CircuitBreakerConfig,
     private readonly baseURL: string,
     private readonly clock: Clock = new SystemClock(),
+    private readonly store: CircuitBreakerStateStore = new InMemoryStateStore(),
   ) {
-    //
+    // Restore state from the store if a snapshot was previously saved.
+    const snapshot = this.store.load(baseURL);
+    this.state = snapshot?.state ?? CircuitState.CLOSED;
+    this.failureCount = snapshot?.failureCount ?? 0;
+    this.successCount = snapshot?.successCount ?? 0;
+    this.nextAttempt = snapshot?.nextAttempt ?? 0;
   }
 
   get currentState(): CircuitState {
@@ -56,6 +69,7 @@ export class CircuitBreaker {
       this.state = CircuitState.HALF_OPEN;
       this.probing = false;
       this.successCount = 0;
+      this.persist();
       logger.warn({ baseURL: this.baseURL, state: this.state }, "Circuit breaker half-open, probing upstream");
     }
 
@@ -84,12 +98,16 @@ export class CircuitBreaker {
 
     if (this.state === CircuitState.HALF_OPEN) {
       this.successCount++;
-      if (this.successCount >= (this.config.successThreshold ?? 1)) {
+      if (this.successCount >= (this.config.successThreshold ?? appEnv.proxy.circuitBreakerSuccessThreshold)) {
         this.state = CircuitState.CLOSED;
         this.successCount = 0;
+        this.persist();
         logger.info({ baseURL: this.baseURL, state: CircuitState.CLOSED }, "Circuit breaker closed, upstream recovered");
+        return;
       }
     }
+
+    this.persist();
   }
 
   recordFailure(): void {
@@ -101,10 +119,25 @@ export class CircuitBreaker {
       this.nextAttempt = this.clock.now() + this.config.timeout;
       this.failureCount = 0;
       this.successCount = 0;
+      this.persist();
       logger.warn(
         { baseURL: this.baseURL, state: CircuitState.OPEN, retryAfterSeconds: this.retryAfterSeconds() },
         "Circuit breaker opened, upstream failing",
       );
+      return;
     }
+
+    this.persist();
+  }
+
+  // ── Private ────────────────────────────────────────────────────────────────
+
+  private persist(): void {
+    this.store.save(this.baseURL, {
+      state: this.state,
+      failureCount: this.failureCount,
+      successCount: this.successCount,
+      nextAttempt: this.nextAttempt,
+    });
   }
 }

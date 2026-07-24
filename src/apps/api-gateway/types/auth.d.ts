@@ -71,6 +71,12 @@ export declare type OAuth2Auth = {
    * Defaults to `"access_token"`.
    */
   tokenTypeHint?: string;
+  /**
+   * When set, successful introspection results are cached for this many
+   * milliseconds. Reduces round-trips to the introspection endpoint for
+   * high-traffic routes. Inactive (`active: false`) responses are never cached.
+   */
+  introspectionCacheTtlMs?: number;
 };
 
 export declare type Auth = JwtAuth | ApiKeyAuth | BasicAuth | OAuth2Auth;

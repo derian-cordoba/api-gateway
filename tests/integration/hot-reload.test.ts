@@ -26,7 +26,13 @@ const { TEMP_ROUTES_FILE } = vi.hoisted(() => {
 });
 
 vi.mock("../../src/apps/api-gateway/config/app-env", () => ({
-  appEnv: { routes: { filePath: TEMP_ROUTES_FILE } },
+  appEnv: {
+    routes: { filePath: TEMP_ROUTES_FILE },
+    proxy: {
+      routesDebounceMs: 300,
+      metricsHistogramBuckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    },
+  },
 }));
 
 vi.mock("../../src/apps/api-gateway/logger", () => ({

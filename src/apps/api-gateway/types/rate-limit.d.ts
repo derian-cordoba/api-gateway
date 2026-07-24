@@ -18,4 +18,14 @@ export declare type RateLimit = {
    * The message to return when the rate limit is exceeded.
    */
   message?: string;
+
+  /**
+   * Determines how the rate-limit key is derived for each request.
+   *
+   * - `"ip"` (default) — client IP address.
+   * - `"header:<name>"` — value of the named request header (e.g. `"header:X-API-Key"`).
+   * - `"jwt:<claim>"` — claim extracted from the decoded JWT payload
+   *   (e.g. `"jwt:sub"`). Falls back to IP when the token or claim is absent.
+   */
+  keyBy?: string;
 };

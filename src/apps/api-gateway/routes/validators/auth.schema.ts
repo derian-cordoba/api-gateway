@@ -1,12 +1,17 @@
 import { z } from "zod";
 
-const JwtAuthSchema = z.object({
-  enabled: z.boolean(),
-  strategy: z.literal("jwt"),
-  secret: z.string().optional(),
-  publicKey: z.string().optional(),
-  algorithms: z.array(z.string()).optional(),
-});
+const JwtAuthSchema = z
+  .object({
+    enabled: z.boolean(),
+    strategy: z.literal("jwt"),
+    secret: z.string().optional(),
+    publicKey: z.string().optional(),
+    algorithms: z.array(z.string()).optional(),
+  })
+  .refine((d) => !d.enabled || d.secret !== undefined || d.publicKey !== undefined, {
+    message: "jwt auth requires either secret (HMAC) or publicKey (RSA/EC)",
+    path: ["secret"],
+  });
 
 const ApiKeyAuthSchema = z.object({
   enabled: z.boolean(),
@@ -36,6 +41,11 @@ const OAuth2AuthSchema = z.object({
   clientId: z.string().min(1, "clientId must not be empty"),
   clientSecret: z.string().min(1, "clientSecret must not be empty"),
   tokenTypeHint: z.string().optional(),
+  introspectionCacheTtlMs: z
+    .number()
+    .int()
+    .positive("introspectionCacheTtlMs must be a positive integer (milliseconds)")
+    .optional(),
 });
 
 export const AuthSchema = z.discriminatedUnion("strategy", [

@@ -13,7 +13,7 @@ export class RoundRobinSelectionStrategy implements SelectionStrategy {
     this.zeroCounts = new Map(urls.map((url) => [url, 0]));
   }
 
-  pick(): string {
+  pick(_req: object): string {
     const url = this.urls[this.index % this.urls.length];
     this.index = (this.index + 1) % this.urls.length;
     return url;

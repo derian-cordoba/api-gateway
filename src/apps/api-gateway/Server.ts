@@ -37,6 +37,16 @@ export class Server {
   }
 
   /**
+   * Returns the underlying HTTP server.
+   * Required when tests need to bind to a port and receive upgrade events
+   * (e.g. WebSocket proxying), since `getApp().listen()` creates a separate
+   * server that does not carry the WebSocket upgrade handlers.
+   */
+  getHttpServer(): HttpServer {
+    return this.httpServer;
+  }
+
+  /**
    * Initialise routes then start the HTTP server.
    */
   async start(): Promise<void> {
@@ -51,14 +61,22 @@ export class Server {
   }
 
   /**
-   * Stop the HTTP server gracefully
+   * Stop the HTTP server gracefully.
+   * Calls closeAllConnections() (Node ≥ 18.2) to forcibly drain keep-alive
+   * and upgrade connections so the server closes promptly in tests.
    */
   async stop(): Promise<void> {
     this.router.stop();
 
+    // Forcibly close any keep-alive or WebSocket connections so that
+    // httpServer.close() resolves immediately instead of waiting for idle drain.
+    if (typeof this.httpServer.closeAllConnections === "function") {
+      this.httpServer.closeAllConnections();
+    }
+
     return new Promise((resolve: (value: void | PromiseLike<void>) => void) => {
       this.httpServer.close((error: Error | undefined) => {
-        if (error) {
+        if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
           logger.warn({ err: error }, "Error while stopping server");
         } else {
           logger.info("Gateway stopped");

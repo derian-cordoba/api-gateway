@@ -25,7 +25,10 @@ vi.mock("../../../src/apps/api-gateway/routes/ProxyManager", () => ({
 vi.mock("node:fs", () => ({ watch: mockWatch }));
 
 vi.mock("../../../src/apps/api-gateway/config/app-env", () => ({
-  appEnv: { routes: { filePath: "/fake/routes.json" } },
+  appEnv: {
+    routes: { filePath: "/fake/routes.json" },
+    proxy: { routesDebounceMs: 300 },
+  },
 }));
 
 vi.mock("../../../src/apps/api-gateway/logger", () => ({
