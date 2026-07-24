@@ -12,4 +12,14 @@ export const CacheSchema = z.object({
         .max(599, "status code must be between 100 and 599"),
     )
     .optional(),
+  staleWhileRevalidateMs: z
+    .number()
+    .int()
+    .min(1, "staleWhileRevalidateMs must be at least 1ms")
+    .optional(),
+  evictionIntervalMs: z
+    .number()
+    .int()
+    .min(1000, "evictionIntervalMs must be at least 1000ms (1 second)")
+    .optional(),
 });

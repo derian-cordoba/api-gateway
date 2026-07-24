@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { IpFilter } from "../types/ip-filter";
+import { ErrorResponseFactory } from "./ErrorResponseFactory";
 
 // ── CIDR helpers ───────────────────────────────────────────────────────────
 
@@ -55,18 +56,16 @@ export function createIpFilterMiddleware(config: IpFilter): RequestHandler {
     const ip = normalizeIp(req.ip ?? req.socket.remoteAddress ?? "");
 
     if (config.deny && matchesAny(ip, config.deny)) {
-      res.status(HttpStatus.FORBIDDEN).json({
-        error: "Forbidden",
-        message: "Your IP address is not permitted to access this resource",
-      });
+      res.status(HttpStatus.FORBIDDEN).json(
+        ErrorResponseFactory.forbidden("Your IP address is not permitted to access this resource"),
+      );
       return;
     }
 
     if (config.allow && !matchesAny(ip, config.allow)) {
-      res.status(HttpStatus.FORBIDDEN).json({
-        error: "Forbidden",
-        message: "Your IP address is not permitted to access this resource",
-      });
+      res.status(HttpStatus.FORBIDDEN).json(
+        ErrorResponseFactory.forbidden("Your IP address is not permitted to access this resource"),
+      );
       return;
     }
 

@@ -116,7 +116,7 @@ describe("OAuth2 introspection auth — integration", () => {
   it("returns 401 when Authorization header is missing", async () => {
     const res = await request.get("/protected");
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/missing/i);
+    expect(res.body.message).toMatch(/missing/i);
   });
 
   it("returns 401 when Authorization scheme is not Bearer", async () => {
@@ -137,7 +137,7 @@ describe("OAuth2 introspection auth — integration", () => {
       .get("/protected")
       .set("Authorization", `Bearer ${INACTIVE_TOKEN}`);
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/inactive/i);
+    expect(res.body.message).toMatch(/inactive/i);
   });
 
   it("returns 401 when the introspection endpoint returns a server error", async () => {
@@ -145,6 +145,6 @@ describe("OAuth2 introspection auth — integration", () => {
       .get("/protected-error")
       .set("Authorization", `Bearer ${VALID_TOKEN}`);
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/introspection failed/i);
+    expect(res.body.message).toMatch(/introspection failed/i);
   });
 });

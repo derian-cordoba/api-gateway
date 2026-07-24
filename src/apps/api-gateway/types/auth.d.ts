@@ -1,3 +1,16 @@
+export declare type AuthRateLimitConfig = {
+  /**
+   * Maximum number of failed authentication attempts before the client IP
+   * is blocked for the remainder of the window.
+   */
+  max: number;
+  /**
+   * Time window in milliseconds during which failures are counted.
+   * The counter resets when this window elapses after the first failure.
+   */
+  windowMs: number;
+};
+
 export declare type JwtAuth = {
   enabled: boolean;
   strategy: "jwt";
@@ -18,6 +31,14 @@ export declare type JwtAuth = {
    * Defaults to ["RS256"] when publicKey is configured, ["HS256"] otherwise.
    */
   algorithms?: string[];
+  /**
+   * URL of a JWKS (JSON Web Key Set) endpoint (e.g. Auth0, Cognito, Okta).
+   * When set, public keys are fetched automatically and cached, enabling
+   * transparent key rotation. Mutually exclusive with `publicKey` and `secret`
+   * (take precedence over them when set).
+   */
+  jwksUri?: string;
+  authRateLimit?: AuthRateLimitConfig;
 };
 
 export declare type ApiKeyAuth = {
@@ -32,6 +53,7 @@ export declare type ApiKeyAuth = {
    * List of valid API keys.
    */
   keys: string[];
+  authRateLimit?: AuthRateLimitConfig;
 };
 
 export declare type BasicAuth = {
@@ -47,6 +69,7 @@ export declare type BasicAuth = {
    * Defaults to "API Gateway".
    */
   realm?: string;
+  authRateLimit?: AuthRateLimitConfig;
 };
 
 export declare type OAuth2Auth = {
@@ -77,6 +100,7 @@ export declare type OAuth2Auth = {
    * high-traffic routes. Inactive (`active: false`) responses are never cached.
    */
   introspectionCacheTtlMs?: number;
+  authRateLimit?: AuthRateLimitConfig;
 };
 
 export declare type Auth = JwtAuth | ApiKeyAuth | BasicAuth | OAuth2Auth;

@@ -19,6 +19,7 @@ export { HealthProber } from "./middleware/circuit-breaker/HealthProber";
 export { ResponseCache } from "./middleware/cache/ResponseCache";
 export { MemoryCacheStore } from "./middleware/cache/MemoryCacheStore";
 export { LoadBalancer } from "./middleware/load-balancer/LoadBalancer";
+export { HealthAwareSelectionStrategy } from "./middleware/load-balancer/HealthAwareSelectionStrategy";
 export { RetryExecutor } from "./middleware/retry/RetryExecutor";
 export { RetryExhaustedException } from "./middleware/retry/RetryExhaustedException";
 export { NodeHttpUpstreamClient } from "./middleware/retry/UpstreamHttpClient";
@@ -28,6 +29,12 @@ export {
   SingleTargetSelector,
   LoadBalancedTargetSelector,
 } from "./middleware/retry/TargetSelector";
+export { FixedBackoff } from "./middleware/retry/FixedBackoff";
+export { ExponentialBackoff } from "./middleware/retry/ExponentialBackoff";
+export { ExponentialJitterBackoff } from "./middleware/retry/ExponentialJitterBackoff";
+export { JwksKeyStore } from "./middleware/auth/JwksKeyStore";
+export { AuthFailureTracker } from "./middleware/auth/AuthFailureTracker";
+export { ErrorResponseFactory } from "./middleware/ErrorResponseFactory";
 
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -44,15 +51,40 @@ export type {
   CircuitBreakerStateStore,
   CircuitBreakerSnapshot,
 } from "./middleware/circuit-breaker/CircuitBreakerStateStore";
+export type {
+  CircuitBreakerEvents,
+  StateChangePayload,
+} from "./middleware/circuit-breaker/CircuitBreakerEvents";
 export { InMemoryStateStore } from "./middleware/circuit-breaker/InMemoryStateStore";
 export type { AuthStrategy } from "./middleware/auth/AuthStrategy";
 export type { IntrospectionCacheEntry } from "./middleware/auth/OAuth2AuthStrategy";
+export type { BackoffStrategy } from "./middleware/retry/BackoffStrategy";
+export type { RateLimitStore } from "./middleware/rate-limit/RateLimitStore";
+export type { GatewayErrorCode, GatewayErrorResponse } from "./middleware/ErrorResponseFactory";
+export type { CacheEntryWithStaleness } from "./middleware/cache/ResponseCache";
+
+// ── Key extractors ─────────────────────────────────────────────────────────
+
+export { RequestKeyExtractorFactory } from "./middleware/key-extractors/RequestKeyExtractorFactory";
+export { IpKeyExtractor } from "./middleware/key-extractors/IpKeyExtractor";
+export { HeaderKeyExtractor } from "./middleware/key-extractors/HeaderKeyExtractor";
+export { JwtClaimKeyExtractor } from "./middleware/key-extractors/JwtClaimKeyExtractor";
+export { CookieKeyExtractor } from "./middleware/key-extractors/CookieKeyExtractor";
+export { QueryParamKeyExtractor } from "./middleware/key-extractors/QueryParamKeyExtractor";
+export type { RequestKeyExtractor } from "./middleware/key-extractors/RequestKeyExtractor";
 
 // ── Configuration types ────────────────────────────────────────────────────
 
 export type { Gateway } from "./types/gateway";
 export type { Proxy } from "./types/proxy";
-export type { Auth, JwtAuth, ApiKeyAuth, BasicAuth, OAuth2Auth } from "./types/auth";
+export type {
+  Auth,
+  JwtAuth,
+  ApiKeyAuth,
+  BasicAuth,
+  OAuth2Auth,
+  AuthRateLimitConfig,
+} from "./types/auth";
 export type { RateLimit } from "./types/rate-limit";
 export type { RetryConfig, RetryBackoff } from "./types/retry";
 export type { CacheConfig } from "./types/cache";

@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const AuthRateLimitSchema = z.object({
+  max: z.number().int().positive("authRateLimit.max must be a positive integer"),
+  windowMs: z.number().int().positive("authRateLimit.windowMs must be a positive number (milliseconds)"),
+});
+
 const JwtAuthSchema = z
   .object({
     enabled: z.boolean(),
@@ -7,17 +12,27 @@ const JwtAuthSchema = z
     secret: z.string().optional(),
     publicKey: z.string().optional(),
     algorithms: z.array(z.string()).optional(),
+    jwksUri: z.url("jwksUri must be a valid URL").optional(),
+    authRateLimit: AuthRateLimitSchema.optional(),
   })
-  .refine((d) => !d.enabled || d.secret !== undefined || d.publicKey !== undefined, {
-    message: "jwt auth requires either secret (HMAC) or publicKey (RSA/EC)",
-    path: ["secret"],
-  });
+  .refine(
+    (data) =>
+      !data.enabled ||
+      data.secret !== undefined ||
+      data.publicKey !== undefined ||
+      data.jwksUri !== undefined,
+    {
+      message: "jwt auth requires either secret (HMAC), publicKey (RSA/EC), or jwksUri (JWKS endpoint)",
+      path: ["secret"],
+    },
+  );
 
 const ApiKeyAuthSchema = z.object({
   enabled: z.boolean(),
   strategy: z.literal("apiKey"),
   header: z.string().optional(),
   keys: z.array(z.string()).min(1, "apiKey auth requires at least one key"),
+  authRateLimit: AuthRateLimitSchema.optional(),
 });
 
 const BasicAuthCredentialSchema = z.object({
@@ -32,6 +47,7 @@ const BasicAuthSchema = z.object({
     .array(BasicAuthCredentialSchema)
     .min(1, "basicAuth requires at least one credential"),
   realm: z.string().optional(),
+  authRateLimit: AuthRateLimitSchema.optional(),
 });
 
 const OAuth2AuthSchema = z.object({
@@ -46,6 +62,7 @@ const OAuth2AuthSchema = z.object({
     .int()
     .positive("introspectionCacheTtlMs must be a positive integer (milliseconds)")
     .optional(),
+  authRateLimit: AuthRateLimitSchema.optional(),
 });
 
 export const AuthSchema = z.discriminatedUnion("strategy", [

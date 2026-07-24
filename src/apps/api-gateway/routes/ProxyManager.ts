@@ -10,6 +10,7 @@ import { RouteRegistrar } from "./RouteRegistrar";
 import { CorsMiddlewareFactory } from "./middleware-factories/CorsMiddlewareFactory";
 import { IpFilterMiddlewareFactory } from "./middleware-factories/IpFilterMiddlewareFactory";
 import { AuthMiddlewareFactory } from "./middleware-factories/AuthMiddlewareFactory";
+import { AuthRateLimiterMiddlewareFactory } from "./middleware-factories/AuthRateLimiterMiddlewareFactory";
 import { RateLimitMiddlewareFactory } from "./middleware-factories/RateLimitMiddlewareFactory";
 import { CircuitBreakerMiddlewareFactory } from "./middleware-factories/CircuitBreakerMiddlewareFactory";
 import { MetricsMiddlewareFactory } from "./middleware-factories/MetricsMiddlewareFactory";
@@ -41,6 +42,7 @@ export class ProxyManager {
       [
         new CorsMiddlewareFactory(),
         new IpFilterMiddlewareFactory(),
+        new AuthRateLimiterMiddlewareFactory(),
         new AuthMiddlewareFactory(),
         new RateLimitMiddlewareFactory(),
         circuitBreakerFactory,

@@ -3,6 +3,7 @@ import { IpKeyExtractor } from "./IpKeyExtractor";
 import { HeaderKeyExtractor } from "./HeaderKeyExtractor";
 import { JwtClaimKeyExtractor } from "./JwtClaimKeyExtractor";
 import { CookieKeyExtractor } from "./CookieKeyExtractor";
+import { QueryParamKeyExtractor } from "./QueryParamKeyExtractor";
 
 // ── Discriminated spec type ──────────────────────────────────────────────────
 
@@ -10,8 +11,9 @@ type IpSpec     = { readonly kind: "ip" };
 type HeaderSpec = { readonly kind: "header"; readonly name: string };
 type JwtSpec    = { readonly kind: "jwt";    readonly claim: string };
 type CookieSpec = { readonly kind: "cookie"; readonly name: string };
+type QuerySpec  = { readonly kind: "query";  readonly name: string };
 
-type KeySpec = IpSpec | HeaderSpec | JwtSpec | CookieSpec;
+type KeySpec = IpSpec | HeaderSpec | JwtSpec | CookieSpec | QuerySpec;
 
 // ── Parser ───────────────────────────────────────────────────────────────────
 
@@ -20,7 +22,7 @@ function parseSpec(raw: string): KeySpec {
 
   const colonIndex = raw.indexOf(":");
   if (colonIndex === -1) {
-    throw new Error(`Invalid key extractor spec "${raw}": expected "ip", "header:<name>", "jwt:<claim>", or "cookie:<name>"`);
+    throw new Error(`Invalid key extractor spec "${raw}": expected "ip", "header:<name>", "jwt:<claim>", "cookie:<name>", or "query:<name>"`);
   }
 
   const kind = raw.slice(0, colonIndex);
@@ -30,8 +32,9 @@ function parseSpec(raw: string): KeySpec {
     case "header": return { kind: "header", name: value };
     case "jwt":    return { kind: "jwt",    claim: value };
     case "cookie": return { kind: "cookie", name: value };
+    case "query":  return { kind: "query",  name: value };
     default:
-      throw new Error(`Unknown key source "${kind}": expected "header", "jwt", or "cookie"`);
+      throw new Error(`Unknown key source "${kind}": expected "header", "jwt", "cookie", or "query"`);
   }
 }
 
@@ -46,6 +49,7 @@ function parseSpec(raw: string): KeySpec {
  *  - `"header:<name>"`   → `HeaderKeyExtractor`
  *  - `"jwt:<claim>"`     → `JwtClaimKeyExtractor`
  *  - `"cookie:<name>"`   → `CookieKeyExtractor`
+ *  - `"query:<name>"`    → `QueryParamKeyExtractor`
  */
 export class RequestKeyExtractorFactory {
   static fromSpec(spec: string): RequestKeyExtractor {
@@ -56,6 +60,7 @@ export class RequestKeyExtractorFactory {
       case "header": return new HeaderKeyExtractor(parsed.name);
       case "jwt":    return new JwtClaimKeyExtractor(parsed.claim);
       case "cookie": return new CookieKeyExtractor(parsed.name);
+      case "query":  return new QueryParamKeyExtractor(parsed.name);
     }
   }
 }

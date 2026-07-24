@@ -4,6 +4,7 @@ import type { Gateway } from "../../types/gateway";
 import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { CircuitBreaker } from "../../middleware/circuit-breaker/CircuitBreaker";
 import { HealthProber } from "../../middleware/circuit-breaker/HealthProber";
+import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
 
 /**
  * Creates the circuit-breaker guard middleware for a route and caches the
@@ -33,10 +34,7 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
       if (!breaker.shouldReject()) return next();
 
       res.set("Retry-After", String(breaker.retryAfterSeconds()));
-      res.status(HttpStatus.SERVICE_UNAVAILABLE).json({
-        error: "Service Unavailable",
-        message: "Circuit breaker open — upstream is not responding",
-      });
+      res.status(HttpStatus.SERVICE_UNAVAILABLE).json(ErrorResponseFactory.circuitOpen());
     };
   }
 

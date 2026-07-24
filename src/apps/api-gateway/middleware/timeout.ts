@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express";
 import { StatusCodes as HttpStatus } from "http-status-codes";
+import { ErrorResponseFactory } from "./ErrorResponseFactory";
 
 /**
  * Returns Express middleware that sends 504 Gateway Timeout if the upstream
@@ -12,10 +13,7 @@ export function createTimeoutMiddleware(ms: number): RequestHandler {
   return (_, res, next) => {
     const timer = setTimeout(() => {
       if (!res.headersSent) {
-        res.status(HttpStatus.GATEWAY_TIMEOUT).json({
-          error: "Gateway Timeout",
-          message: `Upstream did not respond within ${ms}ms`,
-        });
+        res.status(HttpStatus.GATEWAY_TIMEOUT).json(ErrorResponseFactory.gatewayTimeout(ms));
       }
     }, ms);
 

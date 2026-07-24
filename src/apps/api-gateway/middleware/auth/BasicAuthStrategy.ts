@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { BasicAuth } from "../../types/auth";
 import type { AuthStrategy } from "./AuthStrategy";
+import { ErrorResponseFactory } from "../ErrorResponseFactory";
 
 /**
  * Hash both strings with SHA-256 before comparing so timingSafeEqual always
@@ -55,6 +56,6 @@ export class BasicAuthStrategy implements AuthStrategy {
 
   private reject(res: Response): void {
     res.set("WWW-Authenticate", `Basic realm="${this.realm}"`);
-    res.status(HttpStatus.UNAUTHORIZED).json({ error: "Invalid credentials" });
+    res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Invalid credentials"));
   }
 }

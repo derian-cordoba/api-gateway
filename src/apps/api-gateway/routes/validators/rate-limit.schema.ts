@@ -5,8 +5,10 @@ import { z } from "zod";
  *   "ip"
  *   "header:<name>"
  *   "jwt:<claim>"
+ *   "cookie:<name>"
+ *   "query:<name>"
  */
-const KEY_BY_PATTERN = /^(ip|header:[^:]+|jwt:[^:]+)$/;
+const KEY_BY_PATTERN = /^(ip|header:[^:]+|jwt:[^:]+|cookie:[^:]+|query:[^:]+)$/;
 
 export const RateLimitSchema = z.object({
   max: z.number().positive("Rate limit max must be a positive number"),
@@ -22,7 +24,7 @@ export const RateLimitSchema = z.object({
     .string()
     .regex(
       KEY_BY_PATTERN,
-      'keyBy must be "ip", "header:<name>", or "jwt:<claim>"',
+      'keyBy must be "ip", "header:<name>", "jwt:<claim>", "cookie:<name>", or "query:<name>"',
     )
     .optional(),
 });

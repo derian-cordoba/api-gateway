@@ -11,7 +11,7 @@ const mockAuthConfig = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../src/apps/api-gateway/config/app-env", () => ({
-  appEnv: { auth: mockAuthConfig },
+  appEnv: { auth: mockAuthConfig, env: { isDev: false } },
 }));
 
 import { createAuthMiddleware } from "../../../src/apps/api-gateway/middleware/authMiddleware";

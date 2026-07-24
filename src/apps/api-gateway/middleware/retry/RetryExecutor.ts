@@ -4,8 +4,9 @@ import type { RetryConfig } from "../../types/retry";
 import type { CircuitBreaker } from "../circuit-breaker/CircuitBreaker";
 import type { UpstreamHttpClient, UpstreamResponse } from "./UpstreamHttpClient";
 import type { TargetSelector } from "./TargetSelector";
+import type { BackoffStrategy } from "./BackoffStrategy";
 import { RetryExhaustedException } from "./RetryExhaustedException";
-import { appEnv } from "../../config/app-env";
+import { FixedBackoff } from "./FixedBackoff";
 import { logger } from "../../logger";
 
 /**
@@ -16,7 +17,8 @@ import { logger } from "../../logger";
  *  - Delegate target selection to `TargetSelector`
  *  - Delegate the actual HTTP call to `UpstreamHttpClient`
  *  - Record circuit-breaker outcomes
- *  - Apply backoff delays between attempts
+ *  - Apply backoff delays between attempts via a `BackoffStrategy`
+ *  - Skip retries for non-idempotent HTTP methods unless explicitly allowed
  *  - Abort immediately if the client disconnects (via `AbortSignal`)
  *  - Throw `RetryExhaustedException` when all attempts fail
  *
@@ -29,6 +31,7 @@ export class RetryExecutor {
     private readonly client: UpstreamHttpClient,
     private readonly selector: TargetSelector,
     private readonly breaker: CircuitBreaker | null,
+    private readonly backoffStrategy: BackoffStrategy = new FixedBackoff(),
   ) {}
 
   async execute(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
@@ -45,6 +48,16 @@ export class RetryExecutor {
         const { statusCode } = upstream;
 
         if (this.isRetryable(statusCode) && attempt < this.config.attempts) {
+          if (!this.isSafeToRetry(req.method)) {
+            this.breaker?.recordFailure();
+            this.selector.onComplete(req);
+            logger.warn(
+              { baseURL: req.baseUrl, method: req.method, attempt, status: statusCode },
+              "Upstream returned retryable status but method is not safe to retry — returning response",
+            );
+            return upstream;
+          }
+
           this.breaker?.recordFailure();
           lastStatus = statusCode;
           lastErr = undefined;
@@ -94,11 +107,11 @@ export class RetryExecutor {
     return statusCode >= HttpStatus.INTERNAL_SERVER_ERROR;
   }
 
-  private computeDelay(attemptIndex: number): number {
-    if (this.config.backoff === "exponential") {
-      return this.config.delay * Math.pow(appEnv.proxy.retryBackoffMultiplier, attemptIndex);
+  private isSafeToRetry(method: string): boolean {
+    if (this.config.retryMethods !== undefined) {
+      return this.config.retryMethods.includes(method);
     }
-    return this.config.delay;
+    return ["GET", "HEAD", "OPTIONS"].includes(method);
   }
 
   private sleep(attemptIndex: number, signal: AbortSignal): Promise<void> {
@@ -107,7 +120,7 @@ export class RetryExecutor {
         reject(new DOMException("Aborted", "AbortError"));
         return;
       }
-      const ms = this.computeDelay(attemptIndex);
+      const ms = this.backoffStrategy.computeDelay(attemptIndex, this.config.delay);
       const timer = setTimeout(resolve, ms);
       signal.addEventListener("abort", () => {
         clearTimeout(timer);

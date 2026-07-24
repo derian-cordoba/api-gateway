@@ -1,4 +1,4 @@
-export declare type RetryBackoff = "fixed" | "exponential";
+export declare type RetryBackoff = "fixed" | "exponential" | "exponential-jitter";
 
 export declare type RetryConfig = {
   /**
@@ -15,8 +15,9 @@ export declare type RetryConfig = {
 
   /**
    * Backoff strategy.
-   * - "fixed"       — every retry waits exactly `delay` ms
-   * - "exponential" — wait grows as delay * 2^attemptIndex
+   * - "fixed"               — every retry waits exactly `delay` ms
+   * - "exponential"         — wait grows as delay * multiplier^attemptIndex
+   * - "exponential-jitter"  — full-jitter variant: Math.random() * delay * multiplier^attemptIndex
    * @default "fixed"
    */
   backoff?: RetryBackoff;
@@ -28,4 +29,13 @@ export declare type RetryConfig = {
    * @example [500, 502, 503, 504]
    */
   retryOn?: number[];
+
+  /**
+   * HTTP methods that are eligible for retry. Defaults to ["GET", "HEAD", "OPTIONS"]
+   * (safe, idempotent methods) when omitted.
+   *
+   * Explicitly include "POST", "PUT", or "PATCH" only when the upstream is
+   * guaranteed to be idempotent (e.g. upserts, pure functions).
+   */
+  retryMethods?: string[];
 };

@@ -24,8 +24,20 @@ export declare type RateLimit = {
    *
    * - `"ip"` (default) — client IP address.
    * - `"header:<name>"` — value of the named request header (e.g. `"header:X-API-Key"`).
-   * - `"jwt:<claim>"` — claim extracted from the decoded JWT payload
-   *   (e.g. `"jwt:sub"`). Falls back to IP when the token or claim is absent.
+   * - `"jwt:<claim>"` — claim from the decoded JWT payload (e.g. `"jwt:sub"`).
+   * - `"cookie:<name>"` — value of a named cookie (e.g. `"cookie:session_id"`).
+   * - `"query:<name>"` — value of a named query-string parameter (e.g. `"query:api_key"`).
    */
   keyBy?: string;
+
+  /**
+   * Optional pluggable backing store for rate-limit counters.
+   *
+   * When provided, counter state is delegated to this store instead of the
+   * default in-process memory. Use a Redis-backed implementation to share
+   * counters across multiple gateway replicas.
+   *
+   * @see `RateLimitStore` in `middleware/rate-limit/RateLimitStore.ts`
+   */
+  store?: import("../middleware/rate-limit/RateLimitStore").RateLimitStore;
 };

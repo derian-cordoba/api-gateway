@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
 import type { CircuitBreakerConfig } from "../../types/circuit-breaker";
 import type { Clock } from "./Clock";
 import type { CircuitBreakerStateStore } from "./CircuitBreakerStateStore";
+import type { CircuitBreakerEvents, StateChangePayload } from "./CircuitBreakerEvents";
 import { SystemClock } from "./SystemClock";
 import { InMemoryStateStore } from "./InMemoryStateStore";
 import { appEnv } from "../../config/app-env";
@@ -27,8 +29,11 @@ export enum CircuitState {
  *
  * State is persisted through the injected `CircuitBreakerStateStore`, allowing
  * external backends (e.g. Redis) to share state across gateway instances.
+ *
+ * Extends `EventEmitter` to allow embedders to subscribe to state transitions
+ * via the typed `CircuitBreakerEvents` map.
  */
-export class CircuitBreaker {
+export class CircuitBreaker extends EventEmitter {
   private state: CircuitState;
   private failureCount: number;
   private successCount: number;
@@ -44,6 +49,7 @@ export class CircuitBreaker {
     private readonly clock: Clock = new SystemClock(),
     private readonly store: CircuitBreakerStateStore = new InMemoryStateStore(),
   ) {
+    super();
     // Restore state from the store if a snapshot was previously saved.
     const snapshot = this.store.load(baseURL);
     this.state = snapshot?.state ?? CircuitState.CLOSED;
@@ -66,7 +72,7 @@ export class CircuitBreaker {
         return true;
       }
       // Timeout elapsed — transition to HALF_OPEN and allow one probe request.
-      this.state = CircuitState.HALF_OPEN;
+      this.transitionTo(CircuitState.HALF_OPEN);
       this.probing = false;
       this.successCount = 0;
       this.persist();
@@ -99,7 +105,7 @@ export class CircuitBreaker {
     if (this.state === CircuitState.HALF_OPEN) {
       this.successCount++;
       if (this.successCount >= (this.config.successThreshold ?? appEnv.proxy.circuitBreakerSuccessThreshold)) {
-        this.state = CircuitState.CLOSED;
+        this.transitionTo(CircuitState.CLOSED);
         this.successCount = 0;
         this.persist();
         logger.info({ baseURL: this.baseURL, state: CircuitState.CLOSED }, "Circuit breaker closed, upstream recovered");
@@ -115,10 +121,10 @@ export class CircuitBreaker {
     this.failureCount++;
 
     if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.config.threshold) {
-      this.state = CircuitState.OPEN;
       this.nextAttempt = this.clock.now() + this.config.timeout;
       this.failureCount = 0;
       this.successCount = 0;
+      this.transitionTo(CircuitState.OPEN);
       this.persist();
       logger.warn(
         { baseURL: this.baseURL, state: CircuitState.OPEN, retryAfterSeconds: this.retryAfterSeconds() },
@@ -130,7 +136,49 @@ export class CircuitBreaker {
     this.persist();
   }
 
+  // ── Typed EventEmitter overrides ────────────────────────────────────────────
+
+  emit<EventName extends keyof CircuitBreakerEvents>(
+    event: EventName,
+    ...args: CircuitBreakerEvents[EventName]
+  ): boolean {
+    return super.emit(event, ...args);
+  }
+
+  on<EventName extends keyof CircuitBreakerEvents>(
+    event: EventName,
+    listener: (...args: CircuitBreakerEvents[EventName]) => void,
+  ): this {
+    return super.on(event, listener as (...args: unknown[]) => void);
+  }
+
+  once<EventName extends keyof CircuitBreakerEvents>(
+    event: EventName,
+    listener: (...args: CircuitBreakerEvents[EventName]) => void,
+  ): this {
+    return super.once(event, listener as (...args: unknown[]) => void);
+  }
+
+  off<EventName extends keyof CircuitBreakerEvents>(
+    event: EventName,
+    listener: (...args: CircuitBreakerEvents[EventName]) => void,
+  ): this {
+    return super.off(event, listener as (...args: unknown[]) => void);
+  }
+
   // ── Private ────────────────────────────────────────────────────────────────
+
+  /**
+   * Transitions the circuit to `nextState`, updating `this.state` and emitting
+   * a `stateChange` event with the previous and next states.
+   * Does NOT call `persist()` — callers are responsible for persisting after transition.
+   */
+  private transitionTo(nextState: CircuitState): void {
+    const previousState = this.state;
+    this.state = nextState;
+    const payload: StateChangePayload = { baseURL: this.baseURL, previousState, nextState };
+    this.emit("stateChange", payload);
+  }
 
   private persist(): void {
     this.store.save(this.baseURL, {

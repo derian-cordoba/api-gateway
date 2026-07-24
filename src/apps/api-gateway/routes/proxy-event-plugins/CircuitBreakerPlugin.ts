@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import type { CircuitBreaker } from "../../middleware/circuit-breaker/CircuitBreaker";
 import type { ProxyEventPlugin } from "./ProxyEventPlugin";
+import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
 
 /**
  * Feeds upstream outcomes back into a CircuitBreaker instance:
@@ -26,7 +27,7 @@ export class CircuitBreakerPlugin implements ProxyEventPlugin {
 
     if ("headersSent" in res && !res.headersSent) {
       res.writeHead(HttpStatus.BAD_GATEWAY, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Bad Gateway", message: "Upstream service is unavailable" }));
+      res.end(JSON.stringify(ErrorResponseFactory.upstreamUnavailable()));
     }
   }
 }

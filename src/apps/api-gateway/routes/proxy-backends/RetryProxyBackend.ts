@@ -12,6 +12,7 @@ import { RetryExecutor } from "../../middleware/retry/RetryExecutor";
 import { BodySerializer } from "../../middleware/retry/BodySerializer";
 import { HopByHopHeaderFilter } from "../../middleware/retry/HopByHopHeaderFilter";
 import { RetryExhaustedException } from "../../middleware/retry/RetryExhaustedException";
+import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
 
 /**
  * Proxy backend with automatic retry on upstream failures.
@@ -92,16 +93,14 @@ export class RetryProxyBackend implements ProxyBackend {
         err.lastStatus >= HttpStatus.INTERNAL_SERVER_ERROR
           ? err.lastStatus
           : HttpStatus.BAD_GATEWAY;
-      res.status(status).json({
-        error: "Bad Gateway",
-        message: err.cause?.message ?? `Upstream returned ${err.lastStatus}`,
-      });
+      res.status(status).json(
+        ErrorResponseFactory.badGateway(err.cause?.message ?? `Upstream returned ${err.lastStatus}`),
+      );
       return;
     }
 
-    res.status(HttpStatus.BAD_GATEWAY).json({
-      error: "Bad Gateway",
-      message: (err as Error).message ?? "Unknown upstream error",
-    });
+    res.status(HttpStatus.BAD_GATEWAY).json(
+      ErrorResponseFactory.badGateway((err as Error).message ?? "Unknown upstream error"),
+    );
   }
 }

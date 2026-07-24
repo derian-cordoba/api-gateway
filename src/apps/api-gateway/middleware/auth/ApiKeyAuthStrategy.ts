@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { ApiKeyAuth } from "../../types/auth";
 import type { AuthStrategy } from "./AuthStrategy";
+import { ErrorResponseFactory } from "../ErrorResponseFactory";
 
 export class ApiKeyAuthStrategy implements AuthStrategy {
   private readonly headerName: string;
@@ -14,7 +15,7 @@ export class ApiKeyAuthStrategy implements AuthStrategy {
     const provided = req.headers[this.headerName];
 
     if (typeof provided !== "string" || !this.auth.keys.includes(provided)) {
-      res.status(HttpStatus.UNAUTHORIZED).json({ error: "Invalid or missing API key" });
+      res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Invalid or missing API key"));
       return;
     }
 

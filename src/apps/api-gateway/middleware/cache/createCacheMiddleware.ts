@@ -87,11 +87,11 @@ class ResponseBodyInterceptor {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-function serveCachedResponse(entry: CacheEntry, res: Response): void {
+function serveCachedResponse(entry: CacheEntry, res: Response, xCacheValue: string): void {
   for (const [header, value] of Object.entries(entry.headers)) {
     res.setHeader(header, value);
   }
-  res.setHeader("X-Cache", "HIT");
+  res.setHeader("X-Cache", xCacheValue);
   res.status(entry.status).end(entry.body);
 }
 
@@ -119,18 +119,56 @@ function extractForwardableHeaders(res: Response): Record<string, string | strin
  * middleware has already wrapped them, so captured bytes are pre-compression
  * (plain JSON/text). On HIT the body is re-served through the same compression
  * stack, which re-encodes it correctly.
+ *
+ * Stale-While-Revalidate (SWR):
+ * - First stale hit: serve stale entry with `X-Cache: STALE` and mark the
+ *   entry as refreshing so subsequent requests know a refresh is needed.
+ * - Second stale hit (refreshingAt is set): bypass the cache, go to upstream,
+ *   and let the interceptor store the fresh entry. This prevents multiple
+ *   concurrent upstream refreshes.
  */
 export function createCacheMiddleware(cache: ResponseCache): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     const method = req.method.toUpperCase();
     const key = `${method}:${req.originalUrl ?? req.url}`;
 
-    const cached = cache.get(key);
-    if (cached) {
-      serveCachedResponse(cached, res);
+    const result = cache.getWithStaleness(key);
+
+    if (result === null) {
+      // Cache miss — go to upstream and populate the cache on the way back.
+      res.setHeader("X-Cache", "MISS");
+
+      new ResponseBodyInterceptor(res, (body) => {
+        if (cache.isCacheable(method, res.statusCode)) {
+          cache.set(key, {
+            status: res.statusCode,
+            headers: extractForwardableHeaders(res),
+            body,
+          });
+        }
+      });
+
+      next();
       return;
     }
 
+    if (!result.isStale) {
+      // Fresh cache hit — serve immediately.
+      serveCachedResponse(result.entry, res, "HIT");
+      return;
+    }
+
+    // Stale entry within the stale-while-revalidate window.
+    if (result.entry.refreshingAt === undefined) {
+      // First stale hit: serve the stale response and mark the entry so the
+      // next request triggers an upstream refresh.
+      serveCachedResponse(result.entry, res, "STALE");
+      cache.markRefreshing(key);
+      return;
+    }
+
+    // Subsequent stale hit with a refresh already flagged: bypass the cache
+    // and let this request go to upstream to refresh the stored entry.
     res.setHeader("X-Cache", "MISS");
 
     new ResponseBodyInterceptor(res, (body) => {

@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator, type Store } from "express-rate-limit";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { RequestHandler } from "express";
 import type { Gateway } from "../../types/gateway";
@@ -24,7 +24,8 @@ export class RateLimitMiddlewareFactory implements MiddlewareFactory {
       message: config.message ?? "Too many requests",
       standardHeaders: true,
       legacyHeaders: false,
-      keyGenerator: (req) => extractor.extract(req) ?? req.ip ?? "unknown",
+      keyGenerator: (req) => extractor.extract(req) ?? ipKeyGenerator(req.ip ?? "unknown") ?? "unknown",
+      ...(config.store !== undefined ? { store: config.store as Store } : {}),
     });
   }
 }

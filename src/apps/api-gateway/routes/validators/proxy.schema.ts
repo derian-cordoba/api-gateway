@@ -18,8 +18,8 @@ export const ProxySchema = z
     stickyKey: z
       .string()
       .regex(
-        /^(cookie|header):[^:]+$/,
-        'stickyKey must be "cookie:<name>" or "header:<name>"',
+        /^(ip|query:[^:]+|header:[^:]+|jwt:[^:]+|cookie:[^:]+)$/,
+        'stickyKey must be "ip", "header:<name>", "jwt:<claim>", "cookie:<name>", or "query:<name>"',
       )
       .optional(),
     isSecure: z.boolean().optional(),

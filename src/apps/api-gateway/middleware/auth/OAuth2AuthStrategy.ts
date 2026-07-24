@@ -4,6 +4,7 @@ import type { OAuth2Auth } from "../../types/auth";
 import type { AuthStrategy } from "./AuthStrategy";
 import type { CacheStore } from "../cache/CacheStore";
 import { MemoryCacheStore } from "../cache/MemoryCacheStore";
+import { ErrorResponseFactory } from "../ErrorResponseFactory";
 
 export type IntrospectionCacheEntry = {
   active: boolean;
@@ -29,19 +30,19 @@ export class OAuth2AuthStrategy implements AuthStrategy {
     if (!token) {
       res
         .status(HttpStatus.UNAUTHORIZED)
-        .json({ error: "Missing or malformed Authorization header" });
+        .json(ErrorResponseFactory.unauthorized("Missing or malformed Authorization header"));
       return;
     }
 
     try {
       const active = await this.resolveActive(token);
       if (!active) {
-        res.status(HttpStatus.UNAUTHORIZED).json({ error: "Token is inactive or invalid" });
+        res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Token is inactive or invalid"));
         return;
       }
       next();
     } catch {
-      res.status(HttpStatus.UNAUTHORIZED).json({ error: "Token introspection failed" });
+      res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Token introspection failed"));
     }
   }
 
