@@ -12,6 +12,8 @@ import { CacheEditor } from "@/modules/cache/components/CacheEditor";
 import { IpFilterEditor } from "@/modules/ip-filter/components/IpFilterEditor";
 import { HeadersEditor } from "@/modules/headers/components/HeadersEditor";
 import { CorsEditor } from "@/modules/cors/components/CorsEditor";
+import { ValidationEditor } from "@/modules/validation/components/ValidationEditor";
+import { WebhookEditor } from "@/modules/webhook/components/WebhookEditor";
 import { FormField, TextInput } from "@/modules/shared/components/FormControls";
 
 export function RouteEditor({ value, onChange }: { value: GatewayRoute; onChange: (value: GatewayRoute) => void }) {
@@ -42,7 +44,9 @@ export function RouteEditor({ value, onChange }: { value: GatewayRoute; onChange
       <button type="button" className="button button--quiet button--small" onClick={toggleRaw}><Code2 size={16} /> {rawMode ? "Apply JSON" : "Edit JSON"}</button>
     </section>
     {rawMode ? <section className="raw-editor"><textarea className="input textarea code-input" rows={28} value={raw} onChange={(event) => setRaw(event.target.value)} spellCheck={false} />{rawError ? <p className="field-error">{rawError}</p> : null}</section> : <div className="feature-stack">
-      <ProxyEditor value={value.proxy} onChange={(proxy) => patch({ proxy })} />
+      <ProxyEditor value={value.proxy} retryEnabled={value.retry !== undefined} onChange={(proxy) => patch({ proxy })} />
+      <ValidationEditor value={value.validation} onChange={(validation) => patch({ validation })} />
+      <WebhookEditor value={value.webhook} onChange={(webhook) => patch({ webhook })} />
       <AuthenticationEditor value={value.auth} onChange={(auth) => patch({ auth })} />
       <RateLimitEditor value={value.rateLimit} onChange={(rateLimit) => patch({ rateLimit })} />
       <CircuitBreakerEditor value={value.circuitBreaker} onChange={(circuitBreaker) => patch({ circuitBreaker })} />

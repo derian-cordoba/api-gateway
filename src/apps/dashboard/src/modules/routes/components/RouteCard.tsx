@@ -8,12 +8,16 @@ export function RouteCard({ route, index, onDuplicate, onDelete }: { route: Gate
   const target = route.proxy.target ?? `${route.proxy.targets?.length ?? 0} upstream targets`;
   const features = [
     route.auth && "Auth",
+    route.validation && "Validation",
+    route.webhook && "Webhook",
     route.rateLimit && "Rate limit",
     route.circuitBreaker && "Circuit breaker",
     route.retry && "Retry",
     route.cache && "Cache",
     route.ipFilter && "IP filter",
     route.cors && "CORS",
+    route.proxy.upstreamAuth && "Signed upstream",
+    route.proxy.mirror && "Mirroring",
     route.proxy.ws && "WebSocket",
   ].filter(Boolean) as string[];
 
@@ -35,4 +39,3 @@ export function RouteCard({ route, index, onDuplicate, onDelete }: { route: Gate
     </div>
   </article>;
 }
-

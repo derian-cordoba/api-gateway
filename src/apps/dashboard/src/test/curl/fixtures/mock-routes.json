@@ -4,7 +4,12 @@
     "proxy": {
       "target": "http://localhost:4100",
       "changeOrigin": true,
-      "timeout": 5000
+      "timeout": 5000,
+      "upstreamAuth": {
+        "type": "hmac-sha256",
+        "secret": "mock-upstream-secret",
+        "header": "x-mock-signature"
+      }
     },
     "rateLimit": {
       "max": 100,
@@ -15,6 +20,23 @@
       "ttl": 30000,
       "methods": ["GET"],
       "statusCodes": [200]
+    },
+    "validation": {
+      "requiredFields": ["productId"],
+      "allowedContentTypes": ["application/json"],
+      "maxBodyBytes": 1048576
+    },
+    "ipFilter": {
+      "allow": ["127.0.0.1", "2001:db8::/32"]
+    },
+    "circuitBreaker": {
+      "threshold": 3,
+      "timeout": 10000,
+      "fallback": {
+        "status": 503,
+        "body": { "degraded": true },
+        "headers": { "Cache-Control": "no-store" }
+      }
     }
   },
   {
@@ -25,20 +47,35 @@
         { "url": "http://localhost:4202", "weight": 1 }
       ],
       "strategy": "weighted",
-      "changeOrigin": true
+      "changeOrigin": true,
+      "mirror": {
+        "target": "http://localhost:4299",
+        "percentage": 25
+      }
     },
     "auth": {
       "enabled": true,
-      "strategy": "apiKey",
-      "header": "x-api-key",
-      "keys": ["mock-dashboard-test-key"]
+      "strategy": "jwt",
+      "secret": "mock-jwt-secret",
+      "forwardClaims": {
+        "sub": "X-User-Id",
+        "email": "X-User-Email"
+      }
     },
     "retry": {
       "attempts": 2,
       "delay": 100,
       "backoff": "fixed",
-      "retryOn": [502, 503, 504]
+      "retryOn": [502, 503, 504],
+      "collapseRequests": true,
+      "fallback": {
+        "status": 502,
+        "body": { "error": "Orders temporarily unavailable" }
+      }
+    },
+    "webhook": {
+      "provider": "github",
+      "secret": "mock-webhook-secret"
     }
   }
 ]
-

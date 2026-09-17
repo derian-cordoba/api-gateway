@@ -93,6 +93,15 @@ STATUS="$(authorized_curl -o "$RESPONSE_PATH" -w '%{http_code}' "$BASE_URL/api/c
 expect_status 200 "$STATUS" "configuration returns mock routes"
 assert_json 'payload.routes.length === 2' "configuration contains two routes"
 assert_json 'payload.routes[0].baseURL === "/mock/catalog"' "catalog route is returned"
+assert_json 'payload.routes[0].proxy.upstreamAuth.type === "hmac-sha256"' "upstream authentication round-trips"
+assert_json 'payload.routes[0].validation.maxBodyBytes === 1048576' "request validation round-trips"
+assert_json 'payload.routes[0].ipFilter.allow.includes("2001:db8::/32")' "IPv6 filters round-trip"
+assert_json 'payload.routes[0].circuitBreaker.fallback.body.degraded === true' "circuit-breaker fallback round-trips"
+assert_json 'payload.routes[1].proxy.mirror.percentage === 25' "traffic mirroring round-trips"
+assert_json 'payload.routes[1].auth.forwardClaims.sub === "X-User-Id"' "JWT claim forwarding round-trips"
+assert_json 'payload.routes[1].retry.collapseRequests === true' "request collapsing round-trips"
+assert_json 'payload.routes[1].retry.fallback.status === 502' "retry fallback round-trips"
+assert_json 'payload.routes[1].webhook.provider === "github"' "webhook verification round-trips"
 assert_json 'typeof payload.revision === "string" && payload.revision.length === 16' "configuration includes a revision"
 
 REVISION="$(node -e 'const fs=require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).revision)' "$RESPONSE_PATH")"
@@ -100,6 +109,9 @@ REVISION="$(node -e 'const fs=require("node:fs"); process.stdout.write(JSON.pars
 STATUS="$(curl -sS -o "$RESPONSE_PATH" -w '%{http_code}' "$BASE_URL/api/schema")"
 expect_status 200 "$STATUS" "schema metadata is available"
 assert_json 'payload.sections.some((section) => section.id === "authentication")' "schema lists authentication"
+assert_json 'payload.version === 2' "schema exposes the refactored contract version"
+assert_json 'payload.sections.some((section) => section.id === "validation") && payload.sections.some((section) => section.id === "webhook")' "schema lists the new route features"
+assert_json 'payload.capabilities.includes("traffic-mirroring") && payload.capabilities.includes("request-collapsing")' "schema lists new proxy and retry capabilities"
 
 STATUS="$(authorized_curl -o "$RESPONSE_PATH" -w '%{http_code}' \
   -H 'Content-Type: application/json' \
@@ -114,6 +126,13 @@ STATUS="$(authorized_curl -o "$RESPONSE_PATH" -w '%{http_code}' \
   "$BASE_URL/api/config/validate")"
 expect_status 422 "$STATUS" "invalid routes fail validation"
 assert_json 'payload.success === false && payload.issues.length > 0' "validation failure includes issues"
+
+STATUS="$(authorized_curl -o "$RESPONSE_PATH" -w '%{http_code}' \
+  -H 'Content-Type: application/json' \
+  --data-binary '[{"baseURL":"/custom-webhook","proxy":{"target":"http://localhost:4500"},"webhook":{"provider":"custom","secret":"test-secret"}}]' \
+  "$BASE_URL/api/config/validate")"
+expect_status 422 "$STATUS" "custom webhook requires a signature header"
+assert_json 'payload.issues.some((issue) => issue.path.includes("headerName"))' "custom webhook error identifies headerName"
 
 node -e '
   const fs = require("node:fs");

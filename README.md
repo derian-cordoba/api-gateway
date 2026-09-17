@@ -102,7 +102,7 @@ pnpm dev
 
 ## Dashboard
 
-The Next.js dashboard lives entirely in `src/apps/dashboard`. It provides visual editors for proxy targets, load balancing, authentication, rate limiting, circuit breaking, retries, caching, IP filtering, header transforms, and route-level CORS.
+The Next.js dashboard lives entirely in `src/apps/dashboard`. It provides visual editors for proxy targets, load balancing and mirroring, upstream signing, request validation, webhook verification, authentication, rate limiting, circuit breaking and fallbacks, retries, caching, IPv4/IPv6 filtering, header transforms, and route-level CORS.
 
 Run the gateway and dashboard in separate terminals:
 

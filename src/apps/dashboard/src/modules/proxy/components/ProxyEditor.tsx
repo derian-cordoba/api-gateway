@@ -14,7 +14,7 @@ import {
 
 type ProxyConfig = GatewayRoute["proxy"];
 
-export function ProxyEditor({ value, onChange }: { value: ProxyConfig; onChange: (value: ProxyConfig) => void }) {
+export function ProxyEditor({ value, retryEnabled, onChange }: { value: ProxyConfig; retryEnabled: boolean; onChange: (value: ProxyConfig) => void }) {
   const loadBalanced = value.targets !== undefined;
   const update = (patch: Partial<ProxyConfig>) => onChange({ ...value, ...patch });
 
@@ -104,6 +104,31 @@ export function ProxyEditor({ value, onChange }: { value: ProxyConfig; onChange:
         <Toggle checked={value.changeOrigin ?? false} onChange={(changeOrigin) => update({ changeOrigin })} label="Rewrite Host header" />
         <Toggle checked={value.isSecure ?? true} onChange={(isSecure) => update({ isSecure })} label="Verify upstream TLS" />
         <Toggle checked={value.ws ?? false} onChange={(ws) => update({ ws })} label="Proxy WebSockets" />
+      </div>
+      <div className="subsection-grid">
+        <div className="nested-panel nested-panel--flush">
+          <Toggle checked={value.upstreamAuth !== undefined} onChange={(enabled) => update({ upstreamAuth: enabled ? { type: "hmac-sha256", secret: "" } : undefined })} label="Sign upstream requests" />
+          {value.upstreamAuth ? <div className="form-grid form-grid--top-gap">
+            <FormField label="HMAC secret" hint="Shared with the upstream service." wide>
+              <TextInput type="password" autoComplete="new-password" value={value.upstreamAuth.secret} onChange={(event) => update({ upstreamAuth: { ...value.upstreamAuth!, secret: event.target.value } })} />
+            </FormField>
+            <FormField label="Signature header" hint="Defaults to x-gateway-signature." wide>
+              <TextInput value={value.upstreamAuth.header ?? ""} onChange={(event) => update({ upstreamAuth: { ...value.upstreamAuth!, header: event.target.value || undefined } })} placeholder="x-gateway-signature" />
+            </FormField>
+          </div> : null}
+        </div>
+        <div className="nested-panel nested-panel--flush">
+          <Toggle checked={value.mirror !== undefined} onChange={(enabled) => update({ mirror: enabled ? { target: "http://localhost:4400", percentage: 100 } : undefined })} label="Mirror traffic" />
+          {value.mirror ? <div className="form-grid form-grid--top-gap">
+            <FormField label="Mirror target" hint="Fire-and-forget target. Requires retries on this route." wide>
+              <TextInput type="url" value={value.mirror.target} onChange={(event) => update({ mirror: { ...value.mirror!, target: event.target.value } })} />
+            </FormField>
+            <FormField label="Traffic percentage" hint="0 to 100." wide>
+              <NumberInput min={0} max={100} value={value.mirror.percentage} onValue={(percentage) => update({ mirror: { ...value.mirror!, percentage } })} placeholder="100" />
+            </FormField>
+          </div> : null}
+          {value.mirror && !retryEnabled ? <div className="inline-warning">Enable retries for this route to activate traffic mirroring.</div> : null}
+        </div>
       </div>
       <div className="subsection-grid">
         <div>

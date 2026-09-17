@@ -3,7 +3,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import type { AuthRateLimit, GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
-import { FormField, NumberInput, SelectInput, StringListInput, TextInput, Toggle } from "@/modules/shared/components/FormControls";
+import { FormField, KeyValueEditor, NumberInput, SelectInput, StringListInput, TextInput, Toggle } from "@/modules/shared/components/FormControls";
 
 type Auth = NonNullable<GatewayRoute["auth"]>;
 
@@ -49,6 +49,9 @@ function JwtFields({ value, onChange }: { value: Extract<Auth, { strategy: "jwt"
     <FormField label="JWKS URL"><TextInput type="url" value={value.jwksUri ?? ""} onChange={(event) => update({ jwksUri: event.target.value || undefined })} placeholder="https://issuer/.well-known/jwks.json" /></FormField>
     <FormField label="Public key" wide><textarea className="input textarea code-input" rows={4} value={value.publicKey ?? ""} onChange={(event) => update({ publicKey: event.target.value || undefined })} placeholder="-----BEGIN PUBLIC KEY-----" /></FormField>
     <FormField label="Allowed algorithms" hint="One per line or comma separated."><StringListInput value={value.algorithms} onChange={(algorithms) => update({ algorithms })} placeholder="RS256" /></FormField>
+    <FormField label="Forward claims" hint="Map JWT claim names to upstream request header names." wide>
+      <KeyValueEditor value={value.forwardClaims} onChange={(forwardClaims) => update({ forwardClaims })} keyPlaceholder="Claim, e.g. sub" valuePlaceholder="Header, e.g. X-User-Id" />
+    </FormField>
   </div>;
 }
 

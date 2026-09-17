@@ -2,7 +2,8 @@
 
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
-import { FormField, NumberInput, TextInput, Toggle } from "@/modules/shared/components/FormControls";
+import { FormField, KeyValueEditor, NumberInput, TextInput, Toggle } from "@/modules/shared/components/FormControls";
+import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
 
 type Config = NonNullable<GatewayRoute["circuitBreaker"]>;
 
@@ -23,6 +24,13 @@ export function CircuitBreakerEditor({ value, onChange }: { value?: Config; onCh
         <FormField label="Probe timeout" hint="Milliseconds"><NumberInput min={1} value={config.healthCheck.timeoutMs} onValue={(timeoutMs) => update({ healthCheck: { ...config.healthCheck!, timeoutMs } })} /></FormField>
       </div> : null}
     </div>
+    <div className="nested-panel">
+      <Toggle checked={config.fallback !== undefined} onChange={(enabled) => update({ fallback: enabled ? { status: 503, body: { degraded: true } } : undefined })} label="Serve a fallback response while open" />
+      {config.fallback ? <div className="form-grid form-grid--top-gap">
+        <FormField label="Fallback status"><NumberInput min={100} max={599} value={config.fallback.status} onValue={(status) => update({ fallback: { ...config.fallback!, status } })} placeholder="503" /></FormField>
+        <FormField label="Fallback body" hint="Any valid JSON value." wide><JsonValueInput value={config.fallback.body} onChange={(body) => update({ fallback: { ...config.fallback!, body } })} /></FormField>
+        <FormField label="Fallback headers" wide><KeyValueEditor value={config.fallback.headers} onChange={(headers) => update({ fallback: { ...config.fallback!, headers } })} keyPlaceholder="Header name" valuePlaceholder="Header value" /></FormField>
+      </div> : null}
+    </div>
   </FeatureSection>;
 }
-

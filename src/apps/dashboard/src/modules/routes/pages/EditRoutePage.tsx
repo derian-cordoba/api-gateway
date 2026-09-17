@@ -11,7 +11,8 @@ import { createEmptyRoute } from "../tools/create-empty-route";
 import { RouteEditor } from "../components/RouteEditor";
 
 const sections = [
-  ["proxy", "Upstream"], ["authentication", "Authentication"], ["rateLimit", "Rate limiting"],
+  ["proxy", "Upstream"], ["validation", "Request validation"], ["webhook", "Webhook verification"],
+  ["authentication", "Authentication"], ["rateLimit", "Rate limiting"],
   ["circuitBreaker", "Circuit breaker"], ["retry", "Retries"], ["cache", "Response cache"],
   ["ipFilter", "IP filtering"], ["headers", "Header transforms"], ["cors", "CORS"],
 ] as const;
@@ -37,6 +38,8 @@ export function EditRoutePage() {
 
   const enabledSections = useMemo(() => new Set([
     "proxy",
+    route.validation && "validation",
+    route.webhook && "webhook",
     route.auth && "authentication",
     route.rateLimit && "rateLimit",
     route.circuitBreaker && "circuitBreaker",
