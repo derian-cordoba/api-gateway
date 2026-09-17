@@ -13,6 +13,7 @@ import { BodySerializer } from "../../middleware/retry/BodySerializer";
 import { HopByHopHeaderFilter } from "../../middleware/retry/HopByHopHeaderFilter";
 import { RetryExhaustedException } from "../../middleware/retry/RetryExhaustedException";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
+import { logger } from "../../logger";
 
 /**
  * Proxy backend with automatic retry on upstream failures.
@@ -36,6 +37,7 @@ export class RetryProxyBackend implements ProxyBackend {
     const client = new NodeHttpUpstreamClient(
       this.route.proxy.pathRewrite,
       this.route.headers?.request,
+      this.route.proxy.upstreamAuth,
     );
 
     const selector = this.balancer
@@ -52,6 +54,8 @@ export class RetryProxyBackend implements ProxyBackend {
       try {
         const upstream = await executor.execute(req, body, abort.signal);
         this.writeResponse(upstream, res);
+        // Fire mirror after primary response is written — never awaited.
+        this.fireMirror(req, body);
       } catch (err) {
         if (!res.headersSent) this.writeError(err, res);
       }
@@ -87,15 +91,53 @@ export class RetryProxyBackend implements ProxyBackend {
     res.status(upstream.statusCode).end(upstream.body);
   }
 
+  private fireMirror(req: Request, body: Buffer): void {
+    const mirrorConfig = this.route.proxy.mirror;
+    if (!mirrorConfig) return;
+
+    const mirrorPercentage = mirrorConfig.percentage ?? 100;
+    if (mirrorPercentage < 100 && Math.random() * 100 > mirrorPercentage) return;
+
+    // Fire-and-forget: upstreamAuth is intentionally NOT applied to mirror requests.
+    const mirrorClient = new NodeHttpUpstreamClient(this.route.proxy.pathRewrite);
+    mirrorClient.send({ target: mirrorConfig.target, req, body }).catch((mirrorError: unknown) => {
+      // Mirror failures must never affect primary traffic — logged at debug level only.
+      logger.debug(
+        { baseURL: this.route.baseURL, mirrorTarget: mirrorConfig.target, err: mirrorError },
+        "Mirror request failed",
+      );
+    });
+  }
+
   private writeError(err: unknown, res: Response): void {
+    const retryFallback = this.route.retry?.fallback;
+
     if (err instanceof RetryExhaustedException) {
-      const status =
-        err.lastStatus >= HttpStatus.INTERNAL_SERVER_ERROR
-          ? err.lastStatus
-          : HttpStatus.BAD_GATEWAY;
-      res.status(status).json(
+      if (retryFallback) {
+        const responseStatus = retryFallback.status ?? HttpStatus.BAD_GATEWAY;
+        if (retryFallback.body !== undefined) {
+          res.status(responseStatus).json(retryFallback.body);
+        } else {
+          res.status(responseStatus).end();
+        }
+        return;
+      }
+      const upstreamStatus = err.lastStatus >= HttpStatus.INTERNAL_SERVER_ERROR
+        ? err.lastStatus
+        : HttpStatus.BAD_GATEWAY;
+      res.status(upstreamStatus).json(
         ErrorResponseFactory.badGateway(err.cause?.message ?? `Upstream returned ${err.lastStatus}`),
       );
+      return;
+    }
+
+    if (retryFallback) {
+      const responseStatus = retryFallback.status ?? HttpStatus.BAD_GATEWAY;
+      if (retryFallback.body !== undefined) {
+        res.status(responseStatus).json(retryFallback.body);
+      } else {
+        res.status(responseStatus).end();
+      }
       return;
     }
 

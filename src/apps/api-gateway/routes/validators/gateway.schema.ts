@@ -8,6 +8,8 @@ import { ProxySchema } from "./proxy.schema";
 import { RateLimitSchema } from "./rate-limit.schema";
 import { RetrySchema } from "./retry.schema";
 import { RouteCorsSchema } from "./route-cors.schema";
+import { ValidationSchema } from "./validation.schema";
+import { WebhookSchema } from "./webhook.schema";
 
 export const GatewaySchema = z.object({
   baseURL: z.string().startsWith("/", "baseURL must start with /"),
@@ -20,6 +22,8 @@ export const GatewaySchema = z.object({
   cache: CacheSchema.optional(),
   headers: HeadersSchema.optional(),
   cors: RouteCorsSchema.optional(),
+  validation: ValidationSchema.optional(),
+  webhook: WebhookSchema.optional(),
 });
 
 export const GatewaysSchema = z.array(GatewaySchema);

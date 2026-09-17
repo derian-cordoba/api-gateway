@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import { Router as ExpressRouter } from "express";
 import { watch, type FSWatcher } from "node:fs";
 import { ProxyManager } from "./ProxyManager";
+import type { Gateway } from "../types/gateway"
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 
@@ -19,7 +20,10 @@ export class RouteReloader {
   private watcher: FSWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly httpServer?: HttpServer) {
+  constructor(
+    private readonly httpServer?: HttpServer,
+    private readonly onReloaded?: (routes: readonly Gateway[]) => void,
+  ) {
     //
   }
 
@@ -63,11 +67,12 @@ export class RouteReloader {
     try {
       logger.info("Reloading routes config...");
       const newRouter = ExpressRouter();
-      const { router, wsHandlers } = await ProxyManager.build(newRouter);
+      const { router, wsHandlers, routes } = await ProxyManager.build(newRouter);
       // JS assignment is single-threaded — new requests see the new router immediately
       this.innerRouter = router as ExpressRouter;
       this.activeWsHandlers = wsHandlers;
       logger.info("Routes reloaded successfully");
+      this.onReloaded?.(routes);
     } catch (err) {
       logger.error({ err }, "Failed to reload routes — keeping current config");
     }

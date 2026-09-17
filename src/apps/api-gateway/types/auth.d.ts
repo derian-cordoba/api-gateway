@@ -1,3 +1,8 @@
+export declare type BasicAuthCredential = {
+  username: string;
+  password: string;
+};
+
 export declare type AuthRateLimitConfig = {
   /**
    * Maximum number of failed authentication attempts before the client IP
@@ -38,6 +43,16 @@ export declare type JwtAuth = {
    * (take precedence over them when set).
    */
   jwksUri?: string;
+  /**
+   * Map of JWT claim names to upstream request header names.
+   * After the token is successfully verified, each listed claim's value
+   * is injected into `req.headers` before the request is forwarded.
+   *
+   * Example: `{ "sub": "X-User-Id", "email": "X-User-Email" }`
+   *
+   * Claims are coerced to strings. Missing claims are silently skipped.
+   */
+  forwardClaims?: Record<string, string>;
   authRateLimit?: AuthRateLimitConfig;
 };
 
@@ -63,7 +78,7 @@ export declare type BasicAuth = {
    * List of valid username/password pairs.
    * Credentials are compared using a timing-safe algorithm.
    */
-  credentials: Array<{ username: string; password: string }>;
+  credentials: BasicAuthCredential[];
   /**
    * The realm string included in the WWW-Authenticate response header.
    * Defaults to "API Gateway".

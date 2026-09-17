@@ -7,6 +7,8 @@ import { Proxy } from "./proxy";
 import { RateLimit } from "./rate-limit";
 import { RetryConfig } from "./retry";
 import { RouteCors } from "./route-cors";
+import type { ValidationConfig } from "./validation";
+import type { WebhookConfig } from "./webhook";
 
 export declare type Gateway = {
   /**
@@ -72,4 +74,18 @@ export declare type Gateway = {
    * When omitted, OPTIONS requests are forwarded to the upstream.
    */
   cors?: RouteCors;
+
+  /**
+   * Request body validation rules applied before the request is proxied.
+   * Returns 422/415/413 to the client when validation fails — the upstream
+   * never sees an invalid request.
+   */
+  validation?: ValidationConfig;
+
+  /**
+   * Inbound webhook signature verification.
+   * When configured, the gateway verifies the HMAC signature on the request
+   * before forwarding it. Returns 401 when verification fails.
+   */
+  webhook?: WebhookConfig;
 };

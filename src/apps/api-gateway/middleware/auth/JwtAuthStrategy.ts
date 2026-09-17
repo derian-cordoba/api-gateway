@@ -42,6 +42,7 @@ export class JwtAuthStrategy implements AuthStrategy {
 
     try {
       jwt.verify(token, resolved.key, { algorithms: this.resolveAlgorithms(resolved.isAsymmetric) });
+      this.forwardVerifiedClaims(req, token);
       next();
     } catch {
       res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Invalid or expired token"));
@@ -76,9 +77,26 @@ export class JwtAuthStrategy implements AuthStrategy {
 
     try {
       jwt.verify(token, resolved.key, { algorithms: this.resolveAlgorithms(resolved.isAsymmetric) });
+      this.forwardVerifiedClaims(req, token);
       next();
     } catch {
       res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("Invalid or expired token"));
+    }
+  }
+
+  private forwardVerifiedClaims(req: Request, token: string): void {
+    const forwardClaims = this.auth.forwardClaims;
+    if (!forwardClaims || Object.keys(forwardClaims).length === 0) return;
+
+    // Decode without verification — the token was already verified above.
+    const payload = jwt.decode(token) as Record<string, unknown> | null;
+    if (!payload) return;
+
+    for (const [claimName, headerName] of Object.entries(forwardClaims)) {
+      const claimValue = payload[claimName];
+      if (claimValue !== undefined && claimValue !== null) {
+        req.headers[headerName.toLowerCase()] = String(claimValue);
+      }
     }
   }
 

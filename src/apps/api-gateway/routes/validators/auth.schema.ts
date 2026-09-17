@@ -13,6 +13,7 @@ const JwtAuthSchema = z
     publicKey: z.string().optional(),
     algorithms: z.array(z.string()).optional(),
     jwksUri: z.url("jwksUri must be a valid URL").optional(),
+    forwardClaims: z.record(z.string(), z.string()).optional(),
     authRateLimit: AuthRateLimitSchema.optional(),
   })
   .refine(

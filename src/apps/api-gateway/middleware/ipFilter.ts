@@ -18,11 +18,11 @@ function ipv4ToUint32(ip: string): number {
 }
 
 /**
- * Returns true when `ip` falls inside `cidr`.
+ * Returns true when `ip` falls inside `cidr` for IPv4 addresses.
  * `cidr` may be a plain IPv4 address (exact match) or a CIDR range such as
  * `10.0.0.0/8`.
  */
-export function matchesCidr(ip: string, cidr: string): boolean {
+export function matchesIpv4Cidr(ip: string, cidr: string): boolean {
   if (!cidr.includes("/")) {
     return ip === cidr;
   }
@@ -32,6 +32,70 @@ export function matchesCidr(ip: string, cidr: string): boolean {
   const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
 
   return (ipv4ToUint32(ip) & mask) === (ipv4ToUint32(network) & mask);
+}
+
+// ── IPv6 CIDR helpers ──────────────────────────────────────────────────────
+
+/** Expands a potentially compressed IPv6 address to its full 8-group form. */
+function expandIpv6(address: string): string {
+  if (!address.includes(":")) {
+    throw new Error(`Not a valid IPv6 address: ${address}`);
+  }
+
+  const halves = address.split("::");
+  if (halves.length > 2) throw new Error(`Invalid IPv6 address: ${address}`);
+
+  const leftGroups = halves[0] ? halves[0].split(":") : [];
+  const rightGroups = halves[1] ? halves[1].split(":") : [];
+  const missingGroups = 8 - leftGroups.length - rightGroups.length;
+  const expandedGroups = [
+    ...leftGroups,
+    ...Array<string>(missingGroups).fill("0000"),
+    ...rightGroups,
+  ];
+
+  return expandedGroups.map((group) => group.padStart(4, "0")).join(":");
+}
+
+/** Converts a full (expanded) IPv6 address to a 128-bit BigInt. */
+function ipv6ToBigInt(address: string): bigint {
+  return expandIpv6(address)
+    .split(":")
+    .reduce(
+      (accumulator, group) => (accumulator << 16n) | BigInt(parseInt(group, 16)),
+      0n,
+    );
+}
+
+/**
+ * Returns true when `ip` falls inside `cidr` for IPv6 addresses.
+ * `cidr` may be a plain IPv6 address (exact match) or a CIDR range like `2001:db8::/32`.
+ */
+function matchesIpv6Cidr(ip: string, cidr: string): boolean {
+  if (!cidr.includes("/")) return ip === cidr;
+
+  const separatorIndex = cidr.lastIndexOf("/");
+  const networkAddress = cidr.slice(0, separatorIndex);
+  const prefixLength = parseInt(cidr.slice(separatorIndex + 1), 10);
+
+  const fullMask =
+    prefixLength === 0
+      ? 0n
+      : ((1n << 128n) - 1n) & ~((1n << BigInt(128 - prefixLength)) - 1n);
+
+  return (ipv6ToBigInt(ip) & fullMask) === (ipv6ToBigInt(networkAddress) & fullMask);
+}
+
+/**
+ * Returns true when `ip` falls inside `cidr`.
+ * Delegates to `matchesIpv6Cidr` for IPv6 addresses and CIDRs, and to
+ * `matchesIpv4Cidr` for IPv4 addresses and CIDRs.
+ */
+export function matchesCidr(ip: string, cidr: string): boolean {
+  if (ip.includes(":") || cidr.includes(":")) {
+    return matchesIpv6Cidr(ip, cidr);
+  }
+  return matchesIpv4Cidr(ip, cidr);
 }
 
 function matchesAny(ip: string, patterns: string[]): boolean {

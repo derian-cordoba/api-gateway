@@ -33,7 +33,25 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
     return (_req: Request, res: Response, next: NextFunction) => {
       if (!breaker.shouldReject()) return next();
 
-      res.set("Retry-After", String(breaker.retryAfterSeconds()));
+      const retryAfterSeconds = breaker.retryAfterSeconds();
+      res.set("Retry-After", String(retryAfterSeconds));
+
+      const fallback = route.circuitBreaker?.fallback;
+      if (fallback) {
+        const responseStatus = fallback.status ?? HttpStatus.SERVICE_UNAVAILABLE;
+        if (fallback.headers) {
+          for (const [headerName, headerValue] of Object.entries(fallback.headers)) {
+            res.set(headerName, headerValue);
+          }
+        }
+        if (fallback.body !== undefined) {
+          res.status(responseStatus).json(fallback.body);
+        } else {
+          res.status(responseStatus).end();
+        }
+        return;
+      }
+
       res.status(HttpStatus.SERVICE_UNAVAILABLE).json(ErrorResponseFactory.circuitOpen());
     };
   }

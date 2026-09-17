@@ -1,5 +1,12 @@
 export declare type RetryBackoff = "fixed" | "exponential" | "exponential-jitter";
 
+export declare type RetryFallback = {
+  /** HTTP status code. Defaults to 502. */
+  status?: number;
+  /** Response body serialized to JSON. When omitted, the default error JSON is sent. */
+  body?: unknown;
+};
+
 export declare type RetryConfig = {
   /**
    * Maximum number of retry attempts after the initial failure.
@@ -38,4 +45,21 @@ export declare type RetryConfig = {
    * guaranteed to be idempotent (e.g. upserts, pure functions).
    */
   retryMethods?: string[];
+
+  /**
+   * Static response to serve when all retry attempts are exhausted.
+   * When omitted, the gateway returns 502 Bad Gateway.
+   */
+  fallback?: RetryFallback;
+
+  /**
+   * When `true`, concurrent requests with the same method and URL are collapsed
+   * into a single upstream call. The shared response is returned to all waiters.
+   *
+   * Only applies to safe/idempotent HTTP methods (`GET`, `HEAD`, `OPTIONS`).
+   * Non-safe methods always get their own upstream request.
+   *
+   * @default false
+   */
+  collapseRequests?: boolean;
 };

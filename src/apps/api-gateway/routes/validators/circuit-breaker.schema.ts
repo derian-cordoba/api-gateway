@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const FallbackSchema = z.object({
+  status: z.number().int().min(100).max(599).optional(),
+  body: z.unknown().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
 const HealthCheckSchema = z.object({
   url: z.string().url("healthCheck.url must be a valid URL"),
   intervalMs: z
@@ -22,4 +28,5 @@ export const CircuitBreakerSchema = z.object({
     .positive("Circuit breaker successThreshold must be a positive integer")
     .optional(),
   healthCheck: HealthCheckSchema.optional(),
+  fallback: FallbackSchema.optional(),
 });

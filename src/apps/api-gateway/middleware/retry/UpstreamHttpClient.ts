@@ -1,10 +1,12 @@
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { createHmac } from "node:crypto";
 import { URL } from "node:url";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { IncomingHttpHeaders } from "node:http";
 import type { Request } from "express";
 import type { HeadersConfig } from "../../types/headers";
+import type { UpstreamAuthConfig } from "../../types/proxy";
 
 export interface UpstreamRequest {
   target: string;
@@ -38,6 +40,7 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
   constructor(
     private readonly pathRewrite?: Record<string, string>,
     private readonly requestHeadersConfig?: HeadersConfig["request"],
+    private readonly upstreamAuthConfig?: UpstreamAuthConfig,
   ) {}
 
   send({ target, req, body }: UpstreamRequest): Promise<UpstreamResponse> {
@@ -62,6 +65,14 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
         for (const key of this.requestHeadersConfig.remove) {
           delete outHeaders[key.toLowerCase()];
         }
+      }
+
+      if (this.upstreamAuthConfig?.type === "hmac-sha256") {
+        const signatureHeader = this.upstreamAuthConfig.header ?? "x-gateway-signature";
+        const signature = createHmac("sha256", this.upstreamAuthConfig.secret)
+          .update(body)
+          .digest("hex");
+        outHeaders[signatureHeader] = signature;
       }
 
       const upstreamReq = transport(

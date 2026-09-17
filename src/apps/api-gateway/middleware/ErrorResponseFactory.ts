@@ -5,7 +5,12 @@ import { StatusCodes } from "http-status-codes";
  * Lets clients distinguish error categories without parsing the human-readable
  * `error` string.
  */
-export type GatewayErrorCode = keyof typeof StatusCodes | "CIRCUIT_OPEN" | "UPSTREAM_UNAVAILABLE";
+export type GatewayErrorCode =
+  | keyof typeof StatusCodes
+  | "CIRCUIT_OPEN"
+  | "UPSTREAM_UNAVAILABLE"
+  | "WEBHOOK_SIGNATURE_INVALID"
+  | "VALIDATION_ERROR";
 
 /**
  * Canonical error response body emitted by the gateway on all 4xx/5xx
@@ -57,5 +62,17 @@ export class ErrorResponseFactory {
       message: `Upstream did not respond within ${timeoutMs}ms`,
       code: "GATEWAY_TIMEOUT",
     };
+  }
+
+  static webhookSignatureInvalid(): GatewayErrorResponse {
+    return {
+      error: "Unauthorized",
+      message: "Webhook signature verification failed",
+      code: "WEBHOOK_SIGNATURE_INVALID",
+    };
+  }
+
+  static validationError(message: string): GatewayErrorResponse {
+    return { error: "Unprocessable Entity", message, code: "VALIDATION_ERROR" };
   }
 }

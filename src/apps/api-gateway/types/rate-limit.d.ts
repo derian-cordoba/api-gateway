@@ -31,6 +31,16 @@ export declare type RateLimit = {
   keyBy?: string;
 
   /**
+   * A synchronous predicate evaluated before the counter is checked.
+   * When it returns `true`, the request bypasses rate limiting entirely.
+   * Useful for skipping health-check probes or authenticated admin tokens.
+   *
+   * Note: this field is not serializable to JSON — set it programmatically
+   * when embedding the gateway as a library.
+   */
+  skip?: (req: import("express").Request) => boolean;
+
+  /**
    * Optional pluggable backing store for rate-limit counters.
    *
    * When provided, counter state is delegated to this store instead of the

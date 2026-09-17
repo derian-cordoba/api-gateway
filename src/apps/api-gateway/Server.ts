@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import { createServer, type Server as HttpServer } from "http";
 import { Router } from "./routes/Router";
+import { GatewayEventBus } from "./middleware/GatewayEventBus";
 import { appEnv } from "./config/app-env";
 import { logger } from "./logger";
 
@@ -10,6 +11,7 @@ export class Server {
   private readonly httpServer: HttpServer;
   private readonly port: number;
   private readonly prefix: string;
+  private readonly eventBus: GatewayEventBus;
 
   constructor() {
     this.port = appEnv.gateway.port;
@@ -17,6 +19,7 @@ export class Server {
     this.router = new Router();
     this.app = express();
     this.httpServer = createServer(this.app);
+    this.eventBus = new GatewayEventBus();
   }
 
   /**
@@ -24,7 +27,10 @@ export class Server {
    * Call this before start() or use it directly in tests with getApp().
    */
   async init(): Promise<void> {
-    await this.router.init(this.httpServer);
+    await this.router.init(
+      this.httpServer,
+      (routes) => this.eventBus.emit("route:reloaded", routes),
+    );
     this.app.use(this.prefix, this.router.getRouter());
   }
 
@@ -44,6 +50,15 @@ export class Server {
    */
   getHttpServer(): HttpServer {
     return this.httpServer;
+  }
+
+  /**
+   * The gateway-level typed event bus.
+   * Subscribe to gateway lifecycle events such as route reloads and
+   * circuit-breaker state transitions.
+   */
+  getEventBus(): GatewayEventBus {
+    return this.eventBus;
   }
 
   /**

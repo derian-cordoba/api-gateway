@@ -6,6 +6,10 @@ import type { CacheStore } from "../cache/CacheStore";
 import { MemoryCacheStore } from "../cache/MemoryCacheStore";
 import { ErrorResponseFactory } from "../ErrorResponseFactory";
 
+export type OAuth2IntrospectionResponse = {
+  active: boolean;
+};
+
 export type IntrospectionCacheEntry = {
   active: boolean;
   expiresAt: number;
@@ -93,7 +97,7 @@ export class OAuth2AuthStrategy implements AuthStrategy {
       throw new Error(`Introspection endpoint returned HTTP ${response.status}`);
     }
 
-    const data = (await response.json()) as { active: boolean };
+    const data = (await response.json()) as OAuth2IntrospectionResponse;
     return data.active === true;
   }
 }

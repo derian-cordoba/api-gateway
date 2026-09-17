@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const RetryFallbackSchema = z.object({
+  status: z.number().int().min(100).max(599).optional(),
+  body: z.unknown().optional(),
+});
+
 export const RetrySchema = z.object({
   attempts: z
     .number()
@@ -22,4 +27,6 @@ export const RetrySchema = z.object({
     .array(z.string().toUpperCase())
     .min(1, "retryMethods must contain at least one HTTP method")
     .optional(),
+  fallback: RetryFallbackSchema.optional(),
+  collapseRequests: z.boolean().optional(),
 });

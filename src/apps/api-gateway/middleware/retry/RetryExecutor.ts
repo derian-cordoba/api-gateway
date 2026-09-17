@@ -7,6 +7,7 @@ import type { TargetSelector } from "./TargetSelector";
 import type { BackoffStrategy } from "./BackoffStrategy";
 import { RetryExhaustedException } from "./RetryExhaustedException";
 import { FixedBackoff } from "./FixedBackoff";
+import { InFlightRequestCache } from "./InFlightRequestCache";
 import { logger } from "../../logger";
 
 /**
@@ -32,9 +33,20 @@ export class RetryExecutor {
     private readonly selector: TargetSelector,
     private readonly breaker: CircuitBreaker | null,
     private readonly backoffStrategy: BackoffStrategy = new FixedBackoff(),
+    private readonly inFlightCache: InFlightRequestCache = new InFlightRequestCache(),
   ) {}
 
-  async execute(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
+  execute(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
+    if (this.isCollapsible(req)) {
+      const collapseKey = this.buildCollapseKey(req);
+      return this.inFlightCache.getOrExecute(collapseKey, () =>
+        this.executeWithRetry(req, body, signal),
+      );
+    }
+    return this.executeWithRetry(req, body, signal);
+  }
+
+  private async executeWithRetry(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
     let lastStatus = 0;
     let lastErr: Error | undefined;
 
@@ -99,6 +111,17 @@ export class RetryExecutor {
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  private buildCollapseKey(req: Request): string {
+    return `${req.method}:${req.url}`;
+  }
+
+  private isCollapsible(req: Request): boolean {
+    return (
+      this.config.collapseRequests === true &&
+      ["GET", "HEAD", "OPTIONS"].includes(req.method.toUpperCase())
+    );
+  }
 
   private isRetryable(statusCode: number): boolean {
     if (this.config.retryOn) {

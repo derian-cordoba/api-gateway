@@ -24,6 +24,7 @@ export class RateLimitMiddlewareFactory implements MiddlewareFactory {
       message: config.message ?? "Too many requests",
       standardHeaders: true,
       legacyHeaders: false,
+      ...(config.skip !== undefined ? { skip: config.skip } : {}),
       keyGenerator: (req) => extractor.extract(req) ?? ipKeyGenerator(req.ip ?? "unknown") ?? "unknown",
       ...(config.store !== undefined ? { store: config.store as Store } : {}),
     });

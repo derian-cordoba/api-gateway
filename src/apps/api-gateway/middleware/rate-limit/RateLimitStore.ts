@@ -7,12 +7,17 @@
  * The method signatures mirror `express-rate-limit`'s `Store` interface so
  * implementations can delegate directly.
  */
+export type RateLimitIncrementResult = {
+  totalHits: number;
+  resetTime: Date | undefined;
+};
+
 export interface RateLimitStore {
   /**
    * Increment the counter for `key` and return the updated hit count and the
    * time at which the current window resets.
    */
-  increment(key: string): Promise<{ totalHits: number; resetTime: Date | undefined }>;
+  increment(key: string): Promise<RateLimitIncrementResult>;
 
   /** Decrement the counter for `key` by one. */
   decrement(key: string): Promise<void>;

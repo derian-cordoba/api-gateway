@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from "node:http";
+import type { Gateway } from "../types/gateway";
 import express, {
   Router as ExpressRouter,
   type NextFunction,
@@ -36,8 +37,15 @@ export class Router {
   /**
    * Initialise all middleware and routes. Must be awaited before the HTTP
    * server starts listening so that proxy routes are registered in time.
+   *
+   * @param httpServer - Optional HTTP server for WebSocket upgrade support.
+   * @param onRouteReloaded - Optional callback invoked after routes are
+   *   successfully loaded or reloaded with the active route list.
    */
-  async init(httpServer?: HttpServer): Promise<void> {
+  async init(
+    httpServer?: HttpServer,
+    onRouteReloaded?: (routes: readonly Gateway[]) => void,
+  ): Promise<void> {
     // Inject / forward X-Request-ID before logging so every log line carries it
     this.router.use(createRequestIdMiddleware());
 
@@ -60,7 +68,7 @@ export class Router {
     this.router.use(createMetricsRouter(metricsCollector));
 
     // Hot-reloadable proxy routes
-    this.reloader = new RouteReloader(httpServer);
+    this.reloader = new RouteReloader(httpServer, onRouteReloaded);
     await this.reloader.start();
     this.router.use(this.reloader.getDelegatorMiddleware());
 
@@ -91,7 +99,13 @@ export class Router {
   }
 
   private configureBodyParser(): void {
-    this.router.use(express.json());
+    this.router.use(
+      express.json({
+        verify: (_req, _res, rawBodyBuffer) => {
+          (_req as Request & { rawBody?: Buffer }).rawBody = rawBodyBuffer;
+        },
+      }),
+    );
     this.router.use(express.urlencoded({ extended: true }));
     this.router.use(compress());
   }

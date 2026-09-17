@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+const UpstreamAuthSchema = z.object({
+  type: z.literal("hmac-sha256"),
+  secret: z.string().min(1, "upstreamAuth.secret must not be empty"),
+  header: z.string().optional(),
+});
+
+const MirrorSchema = z.object({
+  target: z.url("mirror.target must be a valid URL"),
+  percentage: z.number().min(0).max(100).optional(),
+});
+
 const WeightedTargetSchema = z.object({
   url: z.url("Target URL must be a valid URL"),
   weight: z.number().int().positive("Target weight must be a positive integer").optional(),
@@ -31,6 +42,8 @@ export const ProxySchema = z
       .optional(),
     timeout: z.number().positive("Proxy timeout must be a positive number").optional(),
     ws: z.boolean().optional(),
+    upstreamAuth: UpstreamAuthSchema.optional(),
+    mirror: MirrorSchema.optional(),
   })
   .refine((d) => (d.target !== undefined) !== (d.targets !== undefined), {
     message: "Proxy must have exactly one of: target (single URL) or targets (load-balanced array)",
