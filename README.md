@@ -9,6 +9,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - [Features](#features)
 - [Requirements](#requirements)
 - [Getting Started](#getting-started)
+- [Dashboard](#dashboard)
 - [Configuration](#configuration)
   - [Environment Variables](#environment-variables)
   - [Route Configuration](#route-configuration)
@@ -67,13 +68,14 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Route-level CORS override** — each route can declare its own CORS policy (origin, methods, allowed headers, credentials, preflight `maxAge`) that takes precedence over the global configuration; preflight `OPTIONS` requests are handled entirely by the gateway for routes that have a cors block
 - **OAuth 2.0 token introspection** — fourth auth strategy that validates opaque Bearer tokens by calling an RFC 7662 introspection endpoint; the gateway authenticates to the introspection endpoint using HTTP Basic auth with configurable `clientId` / `clientSecret`
 - **Hot config reload** — edit the routes JSON file (or send `SIGHUP`) and the gateway picks up the new routing table immediately, with no process restart and no dropped connections; built-in 300 ms debounce prevents churn on rapid saves
+- **Visual configuration dashboard** — manage every route feature through a Next.js UI backed by revision-safe, atomic updates to the local JSON route file
 - **Graceful shutdown** — `SIGINT` and `uncaughtException` handlers stop the server cleanly before exiting
 
 ---
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20.9+
 - pnpm 10+
 
 ---
@@ -95,6 +97,40 @@ cp examples/basic/routes.json routes.json   # or write your own
 # 4. Start in development mode (hot-reload)
 pnpm dev
 ```
+
+---
+
+## Dashboard
+
+The Next.js dashboard lives entirely in `src/apps/dashboard`. It provides visual editors for proxy targets, load balancing, authentication, rate limiting, circuit breaking, retries, caching, IP filtering, header transforms, and route-level CORS.
+
+Run the gateway and dashboard in separate terminals:
+
+```bash
+pnpm dev:gateway
+pnpm dev:dashboard
+```
+
+The dashboard is available at `http://localhost:3001` and uses the same `routes.json` file as the gateway. Copy the dashboard environment example when you need a different file path or access token:
+
+```bash
+cp src/apps/dashboard/.env.example src/apps/dashboard/.env.local
+```
+
+Dashboard writes are validated by the gateway's Zod schemas, guarded by a configuration revision, written through a temporary file, and atomically renamed. The gateway watches the containing directory so these atomic updates activate without restarting either application.
+
+Set `DASHBOARD_TOKEN` outside local development. The browser token can then be entered on the dashboard Settings page; it is stored only in that browser.
+
+Dashboard commands:
+
+```bash
+pnpm dev:dashboard
+pnpm build:dashboard
+pnpm --dir src/apps/dashboard test
+pnpm test:dashboard-api
+```
+
+`test:dashboard-api` builds the dashboard, starts it on port `3101` with an isolated temporary copy of the mock route fixture, and exercises every dashboard API with curl. Override the port with `DASHBOARD_TEST_PORT` if needed. The test never reads or writes the project's real `routes.json`.
 
 ---
 

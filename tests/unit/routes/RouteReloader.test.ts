@@ -82,7 +82,7 @@ describe("RouteReloader", () => {
     const reloader = new RouteReloader();
     await reloader.start();
 
-    expect(mockWatch).toHaveBeenCalledWith("/fake/routes.json", expect.any(Function));
+    expect(mockWatch).toHaveBeenCalledWith("/fake", expect.any(Function));
     reloader.stop();
   });
 
@@ -186,10 +186,10 @@ describe("RouteReloader", () => {
     const callsBefore = mockBuild.mock.calls.length;
 
     // Simulate three rapid file-change events (fs.watch fires the callback)
-    const watchCallback = mockWatch.mock.calls[0][1] as () => void;
-    watchCallback();
-    watchCallback();
-    watchCallback();
+    const watchCallback = mockWatch.mock.calls[0][1] as (event: string, file: string) => void;
+    watchCallback("rename", "routes.json");
+    watchCallback("change", "routes.json");
+    watchCallback("change", "routes.json");
 
     // Advance time past the debounce window
     await vi.advanceTimersByTimeAsync(400);
@@ -205,17 +205,30 @@ describe("RouteReloader", () => {
     await reloader.start();
 
     const callsBefore = mockBuild.mock.calls.length;
-    const watchCallback = mockWatch.mock.calls[0][1] as () => void;
+    const watchCallback = mockWatch.mock.calls[0][1] as (event: string, file: string) => void;
 
-    watchCallback();
+    watchCallback("change", "routes.json");
     await vi.advanceTimersByTimeAsync(200); // before debounce fires (300ms window)
-    watchCallback();                         // reset the timer
+    watchCallback("change", "routes.json"); // reset the timer
     await vi.advanceTimersByTimeAsync(200); // 200ms from second call — not yet fired
 
     expect(mockBuild.mock.calls.length - callsBefore).toBe(0);
 
     await vi.advanceTimersByTimeAsync(200); // now > 300ms from second call
     expect(mockBuild.mock.calls.length - callsBefore).toBe(1);
+    reloader.stop();
+  });
+
+  it("ignores changes to other files in the routes directory", async () => {
+    const reloader = new RouteReloader();
+    await reloader.start();
+
+    const callsBefore = mockBuild.mock.calls.length;
+    const watchCallback = mockWatch.mock.calls[0][1] as (event: string, file: string) => void;
+    watchCallback("rename", ".routes.temporary.tmp");
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(mockBuild.mock.calls.length - callsBefore).toBe(0);
     reloader.stop();
   });
 

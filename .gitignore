@@ -1,8 +1,14 @@
 # Auto generated
 node_modules
+.pnpm-store
 
 # Local env files
 .env
 
 # Built files
 /dist
+
+# Next.js dashboard
+src/apps/dashboard/.next
+src/apps/dashboard/out
+src/apps/dashboard/.env.local

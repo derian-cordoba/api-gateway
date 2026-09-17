@@ -20,7 +20,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=20.9.0",
     "pnpm": ">=10.0.0"
   },
   "keywords": [
@@ -38,11 +38,18 @@
   "packageManager": "pnpm@10.6.5",
   "scripts": {
     "dev": "NODE_ENV=development ts-node-dev --ignore-watch node_modules --respawn --transpile-only src/apps/api-gateway/index.ts",
+    "dev:gateway": "pnpm dev",
+    "dev:dashboard": "pnpm --dir src/apps/dashboard dev",
+    "build:gateway": "rm -rf ./dist && tsc -p tsconfig.prod.json",
+    "build:dashboard": "pnpm --dir src/apps/dashboard build",
+    "build:all": "pnpm build:gateway && pnpm build:dashboard",
     "build": "rm -rf ./dist && tsc -p tsconfig.prod.json",
     "postbuild": "chmod +x dist/src/apps/api-gateway/index.js",
     "start": "node dist/src/apps/api-gateway/index.js",
     "prepare": "pnpm build",
     "test": "vitest run",
+    "test:dashboard": "pnpm --dir src/apps/dashboard test",
+    "test:dashboard-api": "pnpm --dir src/apps/dashboard test:api",
     "test:watch": "vitest",
     "example": "bash examples/run.sh"
   },
