@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { Router as ExpressRouter } from "express";
 import { watch, type FSWatcher } from "node:fs";
+import { basename, dirname } from "node:path";
 import { ProxyManager } from "./ProxyManager";
 import type { Gateway } from "../types/gateway"
 import { appEnv } from "../config/app-env";
@@ -94,8 +95,13 @@ export class RouteReloader {
 
   private startWatcher(): void {
     const filePath = appEnv.routes.filePath;
+    const directoryPath = dirname(filePath);
+    const routesFileName = basename(filePath);
     try {
-      this.watcher = watch(filePath, () => {
+      // Watch the containing directory so atomic file replacement (temp file + rename)
+      // does not detach the watcher from the old inode.
+      this.watcher = watch(directoryPath, (_eventType, changedFileName) => {
+        if (changedFileName !== null && changedFileName.toString() !== routesFileName) return;
         if (this.debounceTimer !== null) {
           clearTimeout(this.debounceTimer);
         }
@@ -106,7 +112,7 @@ export class RouteReloader {
         }, this.DEBOUNCE_MS);
       });
       this.watcher.on("error", (err) => logger.warn({ err }, "Routes file watcher error"));
-      logger.info({ filePath }, "Watching routes file for changes");
+      logger.info({ filePath, directoryPath }, "Watching routes file for changes");
     } catch (err) {
       logger.warn({ err, filePath }, "Could not watch routes file — file-based reload disabled");
     }

@@ -1,5 +1,6 @@
 # Auto generated
 node_modules
+.pnpm-store
 
 # Local env files
 .env
@@ -9,3 +10,8 @@ node_modules
 
 # MacOS files
 **/.DS_Store
+
+# Next.js dashboard
+src/apps/dashboard/.next
+src/apps/dashboard/out
+src/apps/dashboard/.env.local
