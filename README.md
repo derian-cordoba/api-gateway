@@ -126,6 +126,8 @@ Dashboard commands:
 ```bash
 pnpm dev:dashboard
 pnpm build:dashboard
+pnpm lint:dashboard
+pnpm lint:dashboard:fix
 pnpm --dir src/apps/dashboard test
 pnpm test:dashboard-api
 ```

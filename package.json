@@ -50,6 +50,8 @@
     "test": "vitest run",
     "test:dashboard": "pnpm --dir src/apps/dashboard test",
     "test:dashboard-api": "pnpm --dir src/apps/dashboard test:api",
+    "lint:dashboard": "pnpm --dir src/apps/dashboard lint",
+    "lint:dashboard:fix": "pnpm --dir src/apps/dashboard lint:fix",
     "test:watch": "vitest",
     "example": "bash examples/run.sh"
   },

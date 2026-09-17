@@ -7,4 +7,3 @@ export class ConfigurationConflictError extends Error {
     this.name = "ConfigurationConflictError";
   }
 }
-

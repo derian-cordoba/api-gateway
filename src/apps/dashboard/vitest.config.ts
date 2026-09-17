@@ -10,7 +10,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/test/**/*.test.ts"],
+    environmentOptions: {
+      jsdom: { url: "http://localhost:3001" },
+    },
+    include: ["src/test/**/*.test.{ts,tsx}"],
+    setupFiles: ["./src/test/setup.ts"],
   },
 });
-

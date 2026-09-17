@@ -22,7 +22,11 @@ export function FeatureSection({
   children: ReactNode;
 }) {
   return (
-    <details className={enabled ? "feature-section feature-section--enabled" : "feature-section"} open={required || enabled} id={id}>
+    <details
+      className={enabled ? "feature-section feature-section--enabled" : "feature-section"}
+      open={required || enabled}
+      id={id}
+    >
       <summary>
         <div>
           <div className="feature-section__title-row">

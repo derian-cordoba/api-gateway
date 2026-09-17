@@ -62,4 +62,3 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unexpected error";
 }
-

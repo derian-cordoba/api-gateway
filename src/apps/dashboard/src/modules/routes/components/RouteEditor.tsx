@@ -16,7 +16,13 @@ import { ValidationEditor } from "@/modules/validation/components/ValidationEdit
 import { WebhookEditor } from "@/modules/webhook/components/WebhookEditor";
 import { FormField, TextInput } from "@/modules/shared/components/FormControls";
 
-export function RouteEditor({ value, onChange }: { value: GatewayRoute; onChange: (value: GatewayRoute) => void }) {
+export function RouteEditor({
+  value,
+  onChange,
+}: {
+  value: GatewayRoute;
+  onChange: (value: GatewayRoute) => void;
+}) {
   const [rawMode, setRawMode] = useState(false);
   const [raw, setRaw] = useState(() => JSON.stringify(value, null, 2));
   const [rawError, setRawError] = useState("");
@@ -37,24 +43,61 @@ export function RouteEditor({ value, onChange }: { value: GatewayRoute; onChange
     }
   };
 
-  return <>
-    <section className="route-basics">
-      <div><span className="eyebrow">Request matching</span><h2>Route identity</h2><p>The prefix clients use to reach this upstream.</p></div>
-      <FormField label="Base URL"><TextInput value={value.baseURL} onChange={(event) => patch({ baseURL: event.target.value })} placeholder="/products" /></FormField>
-      <button type="button" className="button button--quiet button--small" onClick={toggleRaw}><Code2 size={16} /> {rawMode ? "Apply JSON" : "Edit JSON"}</button>
-    </section>
-    {rawMode ? <section className="raw-editor"><textarea className="input textarea code-input" rows={28} value={raw} onChange={(event) => setRaw(event.target.value)} spellCheck={false} />{rawError ? <p className="field-error">{rawError}</p> : null}</section> : <div className="feature-stack">
-      <ProxyEditor value={value.proxy} retryEnabled={value.retry !== undefined} onChange={(proxy) => patch({ proxy })} />
-      <ValidationEditor value={value.validation} onChange={(validation) => patch({ validation })} />
-      <WebhookEditor value={value.webhook} onChange={(webhook) => patch({ webhook })} />
-      <AuthenticationEditor value={value.auth} onChange={(auth) => patch({ auth })} />
-      <RateLimitEditor value={value.rateLimit} onChange={(rateLimit) => patch({ rateLimit })} />
-      <CircuitBreakerEditor value={value.circuitBreaker} onChange={(circuitBreaker) => patch({ circuitBreaker })} />
-      <RetryEditor value={value.retry} onChange={(retry) => patch({ retry })} />
-      <CacheEditor value={value.cache} onChange={(cache) => patch({ cache })} />
-      <IpFilterEditor value={value.ipFilter} onChange={(ipFilter) => patch({ ipFilter })} />
-      <HeadersEditor value={value.headers} onChange={(headers) => patch({ headers })} />
-      <CorsEditor value={value.cors} onChange={(cors) => patch({ cors })} />
-    </div>}
-  </>;
+  return (
+    <>
+      <section className="route-basics">
+        <div>
+          <span className="eyebrow">Request matching</span>
+          <h2>Route identity</h2>
+          <p>The prefix clients use to reach this upstream.</p>
+        </div>
+        <FormField label="Base URL">
+          <TextInput
+            value={value.baseURL}
+            onChange={(event) => patch({ baseURL: event.target.value })}
+            placeholder="/products"
+          />
+        </FormField>
+        <button type="button" className="button button--quiet button--small" onClick={toggleRaw}>
+          <Code2 size={16} /> {rawMode ? "Apply JSON" : "Edit JSON"}
+        </button>
+      </section>
+      {rawMode ? (
+        <section className="raw-editor">
+          <textarea
+            className="input textarea code-input"
+            rows={28}
+            value={raw}
+            onChange={(event) => setRaw(event.target.value)}
+            spellCheck={false}
+          />
+          {rawError ? <p className="field-error">{rawError}</p> : null}
+        </section>
+      ) : (
+        <div className="feature-stack">
+          <ProxyEditor
+            value={value.proxy}
+            retryEnabled={value.retry !== undefined}
+            onChange={(proxy) => patch({ proxy })}
+          />
+          <ValidationEditor
+            value={value.validation}
+            onChange={(validation) => patch({ validation })}
+          />
+          <WebhookEditor value={value.webhook} onChange={(webhook) => patch({ webhook })} />
+          <AuthenticationEditor value={value.auth} onChange={(auth) => patch({ auth })} />
+          <RateLimitEditor value={value.rateLimit} onChange={(rateLimit) => patch({ rateLimit })} />
+          <CircuitBreakerEditor
+            value={value.circuitBreaker}
+            onChange={(circuitBreaker) => patch({ circuitBreaker })}
+          />
+          <RetryEditor value={value.retry} onChange={(retry) => patch({ retry })} />
+          <CacheEditor value={value.cache} onChange={(cache) => patch({ cache })} />
+          <IpFilterEditor value={value.ipFilter} onChange={(ipFilter) => patch({ ipFilter })} />
+          <HeadersEditor value={value.headers} onChange={(headers) => patch({ headers })} />
+          <CorsEditor value={value.cors} onChange={(cors) => patch({ cors })} />
+        </div>
+      )}
+    </>
+  );
 }

@@ -8,4 +8,3 @@ export function isDashboardRequestAuthorized(request: NextRequest): boolean {
   const headerToken = request.headers.get("x-dashboard-token");
   return bearer === expectedToken || headerToken === expectedToken;
 }
-

@@ -27,7 +27,9 @@ export function useRouteTools(
 
     const register = (tool: ToolDefinition) => {
       try {
-        void Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => undefined);
+        void Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(
+          () => undefined,
+        );
       } catch {
         // WebMCP is progressive enhancement; the dashboard remains fully usable without it.
       }
@@ -69,7 +71,10 @@ export function useRouteTools(
         if (routes.some((route) => route.baseURL === input.baseURL)) {
           throw new Error(`A route already uses ${input.baseURL}.`);
         }
-        await save([...routes, { baseURL: input.baseURL, proxy: { target: input.target, changeOrigin: true } }]);
+        await save([
+          ...routes,
+          { baseURL: input.baseURL, proxy: { target: input.target, changeOrigin: true } },
+        ]);
         return { created: true, baseURL: input.baseURL, routeCount: routes.length + 1 };
       },
     });

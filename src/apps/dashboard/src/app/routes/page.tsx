@@ -6,4 +6,3 @@ export const metadata: Metadata = { title: "Routes" };
 export default function Page() {
   return <RoutesPage />;
 }
-

@@ -53,4 +53,3 @@ function findPrefixWarnings(routes: GatewayRoute[]): ConfigurationWarning[] {
 
   return warnings;
 }
-

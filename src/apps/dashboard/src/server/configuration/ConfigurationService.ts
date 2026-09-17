@@ -17,4 +17,3 @@ export class ConfigurationService {
     return this.store.write(routes, expectedRevision);
   }
 }
-

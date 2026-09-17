@@ -20,4 +20,3 @@ export interface RouteConfigStore {
   read(): Promise<StoredRouteConfig>;
   write(routes: GatewayRoute[], expectedRevision?: string): Promise<StoredRouteConfig>;
 }
-
