@@ -1,18 +1,24 @@
-import { createHmac } from "node:crypto";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import type { Gateway } from "../../types/gateway";
-import type { WebhookConfig } from "../../types/webhook";
 import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
-import { timingSafeStringEqual } from "../../../../shared/security/timingSafeStringEqual";
 import { getHeaderValue } from "../../../../shared/http/getHeaderValue";
+import { WebhookSignatureVerifierFactory } from "../webhook-verifiers/WebhookSignatureVerifierFactory";
+import type { WebhookSignatureVerifierResolver } from "../webhook-verifiers/WebhookSignatureVerifier";
 
 export class WebhookMiddlewareFactory implements MiddlewareFactory {
+  constructor(
+    private readonly verifierFactory: WebhookSignatureVerifierResolver =
+      new WebhookSignatureVerifierFactory(),
+  ) {}
+
   create(route: Gateway): RequestHandler | null {
     const webhookConfig = route.webhook;
 
     if (!webhookConfig) return null;
+
+    const verifier = this.verifierFactory.create(webhookConfig);
 
     return (req: Request, res: Response, next: NextFunction): void => {
       const rawBodyBuffer = req.rawBody;
@@ -28,19 +34,14 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
         return;
       }
 
-      const signatureHeaderName = this.resolveSignatureHeaderName(webhookConfig);
-      const signatureHeaderValue = getHeaderValue(req.headers[signatureHeaderName]);
+      const signatureHeaderValue = getHeaderValue(req.headers[verifier.signatureHeaderName]);
 
       if (!signatureHeaderValue) {
         res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.webhookSignatureInvalid());
         return;
       }
 
-      const isSignatureValid = this.verifySignature(
-        rawBodyBuffer,
-        signatureHeaderValue,
-        webhookConfig,
-      );
+      const isSignatureValid = verifier.verify(rawBodyBuffer, signatureHeaderValue);
 
       if (!isSignatureValid) {
         res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.webhookSignatureInvalid());
@@ -49,85 +50,5 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
 
       next();
     };
-  }
-
-  private resolveSignatureHeaderName(webhookConfig: WebhookConfig): string {
-    if (webhookConfig.provider === "github") {
-      return "x-hub-signature-256";
-    }
-
-    if (webhookConfig.provider === "stripe") {
-      return "stripe-signature";
-    }
-
-    // For "custom" providers, headerName is guaranteed present by the schema validator.
-    return (webhookConfig.headerName as string).toLowerCase();
-  }
-
-  private verifySignature(
-    rawBodyBuffer: Buffer,
-    signatureHeaderValue: string,
-    webhookConfig: WebhookConfig,
-  ): boolean {
-    if (webhookConfig.provider === "github") {
-      return this.verifyGitHub(rawBodyBuffer, signatureHeaderValue, webhookConfig.secret);
-    }
-
-    if (webhookConfig.provider === "stripe") {
-      return this.verifyStripe(rawBodyBuffer, signatureHeaderValue, webhookConfig.secret);
-    }
-
-    const hashAlgorithm = webhookConfig.hashAlgorithm ?? "sha256";
-    return this.verifyCustom(rawBodyBuffer, signatureHeaderValue, webhookConfig.secret, hashAlgorithm);
-  }
-
-  private verifyGitHub(
-    rawBodyBuffer: Buffer,
-    signatureHeaderValue: string,
-    secret: string,
-  ): boolean {
-    const expectedSignature =
-      "sha256=" + createHmac("sha256", secret).update(rawBodyBuffer).digest("hex");
-
-    return timingSafeStringEqual(expectedSignature, signatureHeaderValue);
-  }
-
-  private verifyStripe(
-    rawBodyBuffer: Buffer,
-    signatureHeaderValue: string,
-    secret: string,
-  ): boolean {
-    // Stripe signature format: "t=<timestamp>,v1=<hex_signature>"
-    const signatureParts = signatureHeaderValue.split(",");
-
-    const timestampPart = signatureParts.find((part) => part.startsWith("t="));
-    const v1Part = signatureParts.find((part) => part.startsWith("v1="));
-
-    if (!timestampPart || !v1Part) {
-      return false;
-    }
-
-    const timestamp = timestampPart.slice("t=".length);
-    const receivedSignature = v1Part.slice("v1=".length);
-
-    if (!timestamp || !receivedSignature) {
-      return false;
-    }
-
-    const signedPayload = timestamp + "." + rawBodyBuffer.toString("utf-8");
-    const expectedSignature = createHmac("sha256", secret).update(signedPayload).digest("hex");
-
-    return timingSafeStringEqual(expectedSignature, receivedSignature);
-  }
-
-  private verifyCustom(
-    rawBodyBuffer: Buffer,
-    signatureHeaderValue: string,
-    secret: string,
-    algorithm: string,
-  ): boolean {
-    const expectedSignature = createHmac(algorithm, secret).update(rawBodyBuffer).digest("hex");
-
-    return timingSafeStringEqual(expectedSignature, signatureHeaderValue);
   }
 }

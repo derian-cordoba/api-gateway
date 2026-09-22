@@ -1,29 +1,41 @@
-export declare type WebhookConfig = {
+export declare type WebhookProvider = "github" | "stripe" | "custom";
+
+export declare type GitHubWebhookConfig = {
   /**
-   * Webhook provider preset. Each preset knows the correct signature header
-   * and hashing scheme for that provider.
-   *
-   * - `"github"` — `X-Hub-Signature-256: sha256=<hex>`, HMAC-SHA256 of the raw body.
-   * - `"stripe"` — `Stripe-Signature: t=<ts>,v1=<hex>`, timestamp + HMAC-SHA256.
-   * - `"custom"` — configure `headerName` and `hashAlgorithm` explicitly.
+   * Uses `X-Hub-Signature-256: sha256=<hex>` and HMAC-SHA256 of the raw body.
    */
-  provider: "github" | "stripe" | "custom";
+  provider: "github";
 
   /**
    * Shared secret used to compute the expected signature.
    */
   secret: string;
 
-  /**
-   * Override the header name that carries the signature.
-   * Required when `provider` is `"custom"`.
-   * Ignored for `"github"` and `"stripe"` (their header names are fixed).
-   */
+  /** Ignored because GitHub uses the fixed `X-Hub-Signature-256` header. */
   headerName?: string;
 
-  /**
-   * Hash algorithm for `"custom"` providers (e.g. `"sha256"`, `"sha1"`).
-   * Defaults to `"sha256"` when `provider` is `"custom"`.
-   */
+  /** Ignored because GitHub requires HMAC-SHA256. */
   hashAlgorithm?: string;
 };
+
+export declare type StripeWebhookConfig = {
+  provider: "stripe";
+  secret: string;
+  /** Ignored because Stripe uses the fixed `Stripe-Signature` header. */
+  headerName?: string;
+  /** Ignored because Stripe requires HMAC-SHA256. */
+  hashAlgorithm?: string;
+};
+
+export declare type CustomWebhookConfig = {
+  provider: "custom";
+  secret: string;
+  headerName: string;
+  /** Defaults to `sha256`. */
+  hashAlgorithm?: string;
+};
+
+export declare type WebhookConfig =
+  | GitHubWebhookConfig
+  | StripeWebhookConfig
+  | CustomWebhookConfig;

@@ -1,17 +1,28 @@
 import { z } from "zod";
 
-export const WebhookSchema = z
-  .object({
-    provider: z.enum(["github", "stripe", "custom"]),
-    secret: z.string().min(1, "webhook.secret must not be empty"),
-    headerName: z.string().optional(),
-    hashAlgorithm: z.string().optional(),
-  })
-  .refine(
-    (webhookConfig) =>
-      webhookConfig.provider !== "custom" || webhookConfig.headerName !== undefined,
-    {
-      message: 'webhook.headerName is required when provider is "custom"',
-      path: ["headerName"],
-    },
-  );
+const GitHubWebhookSchema = z.object({
+  provider: z.literal("github"),
+  secret: z.string().min(1, "webhook.secret must not be empty"),
+  headerName: z.string().optional(),
+  hashAlgorithm: z.string().optional(),
+});
+
+const StripeWebhookSchema = z.object({
+  provider: z.literal("stripe"),
+  secret: z.string().min(1, "webhook.secret must not be empty"),
+  headerName: z.string().optional(),
+  hashAlgorithm: z.string().optional(),
+});
+
+const CustomWebhookSchema = z.object({
+  provider: z.literal("custom"),
+  secret: z.string().min(1, "webhook.secret must not be empty"),
+  headerName: z.string().min(1, 'webhook.headerName is required when provider is "custom"'),
+  hashAlgorithm: z.string().optional(),
+});
+
+export const WebhookSchema = z.discriminatedUnion("provider", [
+  GitHubWebhookSchema,
+  StripeWebhookSchema,
+  CustomWebhookSchema,
+]);

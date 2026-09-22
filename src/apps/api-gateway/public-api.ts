@@ -114,4 +114,10 @@ export type { RouteCors } from "./types/route-cors";
 export type { BalancerStrategy, WeightedTarget } from "./types/load-balancer";
 export type { CacheEntry, CacheOptions } from "./middleware/cache/ResponseCache";
 export type { ValidationConfig } from "./types/validation";
-export type { WebhookConfig } from "./types/webhook";
+export type {
+  WebhookProvider,
+  WebhookConfig,
+  GitHubWebhookConfig,
+  StripeWebhookConfig,
+  CustomWebhookConfig,
+} from "./types/webhook";
