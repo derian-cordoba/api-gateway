@@ -18,6 +18,12 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
   - [API Key](#api-key)
   - [Basic Auth](#basic-auth)
   - [OAuth 2.0 Token Introspection](#oauth-20-token-introspection)
+  - [JWKS and Forwarded Claims](#jwks-and-forwarded-claims)
+  - [Authentication Failure Limiting](#authentication-failure-limiting)
+- [Request Validation](#request-validation)
+- [Webhook Verification](#webhook-verification)
+- [Upstream Request Signing](#upstream-request-signing)
+- [Traffic Mirroring](#traffic-mirroring)
 - [Request Timeout per Route](#request-timeout-per-route)
 - [Circuit Breaker](#circuit-breaker)
 - [Load Balancing](#load-balancing)
@@ -61,7 +67,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Health check endpoint** — `GET /health` returns uptime, version, and timestamp; always available regardless of configured routes
 - **Optional URL prefix** — mount all routes under a shared prefix (e.g. `/api/v1`) via `GATEWAY_PREFIX`
 - **Body forwarding** — JSON bodies on `POST`, `PUT`, and `PATCH` requests are correctly forwarded to upstreams (`fixRequestBody`)
-- **Retry with backoff** — per-route retry policy that transparently retries 5xx responses and network errors before returning a failure to the client; supports fixed and exponential backoff; composable with load balancing and the circuit breaker
+- **Retry with backoff** — configurable retries for HTTP failures and network errors; the route backend currently uses fixed delays, while exponential and jitter strategy classes are available for custom executor composition
 - **In-memory response caching** — cache upstream responses per route with a configurable TTL; cache hits bypass the upstream entirely and return the stored response with an `X-Cache: HIT` header; configurable by HTTP method and status code
 - **Prometheus metrics endpoint** — `GET /metrics` exposes `gateway_requests_total`, `gateway_request_duration_seconds`, `gateway_upstream_errors_total`, and `gateway_cache_hits_total` in Prometheus text format; labelled by route and method for easy dashboarding
 - **Per-route header transformation** — add, override, or remove individual headers on the outgoing upstream request and/or the response returned to the client; no code changes needed when onboarding a new upstream with different header conventions
@@ -70,6 +76,13 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Hot config reload** — edit the routes JSON file (or send `SIGHUP`) and the gateway picks up the new routing table immediately, with no process restart and no dropped connections; built-in 300 ms debounce prevents churn on rapid saves
 - **Visual configuration dashboard** — manage every route feature through a Next.js UI backed by revision-safe, atomic updates to the local JSON route file
 - **Graceful shutdown** — `SIGINT` and `uncaughtException` handlers stop the server cleanly before exiting
+- **Request validation** — require JSON fields, restrict content types, and reject declared body lengths above a per-route limit before forwarding
+- **Webhook verification** — GitHub, Stripe, and custom HMAC signature verification using separate provider strategies and typed configuration
+- **Upstream request signing** — sign forwarded bodies with HMAC-SHA256 through the retry backend
+- **Traffic mirroring** — copy a configurable percentage of primary traffic to a shadow target through the retry backend
+- **Extended authentication** — JWKS public-key lookup, forwarding verified JWT claims to headers, OAuth introspection caching, and per-IP authentication failure limits
+- **Failure handling** — configurable circuit-open and retry-error responses, method-aware HTTP-status retries, and optional in-flight request collapsing
+- **Runnable examples** — 20 standalone projects with shared HTTP helpers, centralized startup and cleanup, local JavaScript services, and HTTP smoke checks
 
 ---
 
@@ -210,6 +223,8 @@ Routes are defined as a JSON array. Each entry is a **Gateway** object:
   cache?:          Cache          // optional — per-route in-memory response caching
   headers?:        Headers        // optional — per-route request / response header transforms
   cors?:           RouteCors      // optional — per-route CORS policy (overrides global)
+  validation?:     ValidationConfig // optional — body fields, content type, and declared size
+  webhook?:        WebhookConfig  // optional — inbound provider signature verification
 }
 ```
 
@@ -222,7 +237,7 @@ Exactly one of `target` or `targets` must be provided.
 | `target` | `string` | ✅ (or `targets`) | Single upstream URL. Mutually exclusive with `targets`. |
 | `targets` | `WeightedTarget[]` | ✅ (or `target`) | Two or more upstream URLs for load balancing. Mutually exclusive with `target`. |
 | `strategy` | `"round-robin" \| "weighted" \| "least-connections" \| "sticky"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
-| `stickyKey` | `string` | — | Key source for the `"sticky"` strategy. Accepted formats: `"ip"`, `"header:<name>"`, `"jwt:<claim>"`, `"cookie:<name>"`. Required when `strategy` is `"sticky"`. Defaults to `"header:X-Session-ID"`. |
+| `stickyKey` | `string` | — | Required for `"sticky"`; accepts `"ip"`, `"header:<name>"`, `"jwt:<claim>"`, `"cookie:<name>"`, or `"query:<name>"`. There is no schema default. |
 | `ws` | `boolean` | — | Enable WebSocket proxying for this route. |
 | `changeOrigin` | `boolean` | — | Rewrite the `Host` header to the target origin. |
 | `pathRewrite` | `{ [pattern]: replacement }` | — | Regex path rewrite rules applied before forwarding. |
@@ -230,6 +245,8 @@ Exactly one of `target` or `targets` must be provided.
 | `isSecure` | `boolean` | — | Verify the upstream TLS certificate. |
 | `method` | `string` | — | Override the HTTP method forwarded to the upstream. |
 | `timeout` | `number` | — | Maximum milliseconds to wait for an upstream response. Exceeding this limit returns `504 Gateway Timeout` and aborts the upstream connection. |
+| `upstreamAuth` | `{ type: "hmac-sha256"; secret: string; header?: string }` | — | Sign the forwarded body; default header is `x-gateway-signature`. Requires the retry backend. See [Upstream Request Signing](#upstream-request-signing). |
+| `mirror` | `{ target: string; percentage?: number }` | — | Shadow target URL and sampling percentage (0–100, default 100). Requires the retry backend. See [Traffic Mirroring](#traffic-mirroring). |
 
 **`WeightedTarget`**
 
@@ -253,6 +270,7 @@ Exactly one of `target` or `targets` must be provided.
 | Value | Description |
 |---|---|
 | `"ip"` | Client IP address (default). |
+| `"query:<name>"` | String query parameter (e.g. `"query:tenant"`); falls back to IP when unavailable. |
 | `"header:<name>"` | Value of the named request header (e.g. `"header:X-API-Key"`). |
 | `"jwt:<claim>"` | Claim extracted from the decoded JWT payload (e.g. `"jwt:sub"`). Falls back to IP when the token or claim is absent. |
 | `"cookie:<name>"` | Value of the named cookie (e.g. `"cookie:session_id"`). Requires `cookie-parser` to be mounted. Falls back to IP when the cookie is absent. |
@@ -263,7 +281,7 @@ Responses include standard `RateLimit-*` headers (RFC draft-8).
 
 Adds authentication middleware to a route. When `enabled` is `false` the middleware is a no-op passthrough — no overhead, no token check.
 
-Three strategies are supported, selected with the `strategy` field.
+Four strategies are supported: `jwt`, `apiKey`, `basicAuth`, and [oauth2](#oauth-20-token-introspection). All support optional `authRateLimit: { max, windowMs }`; see [Authentication Failure Limiting](#authentication-failure-limiting).
 
 **`"jwt"` — Bearer token validation**
 
@@ -274,6 +292,10 @@ Three strategies are supported, selected with the `strategy` field.
 | `secret` | `string` | — | Shared secret for HMAC algorithms (HS256, HS384, HS512). Falls back to `JWT_SECRET` env var. |
 | `publicKey` | `string` | — | PEM-encoded public key or X.509 certificate for asymmetric algorithms (RS256, RS384, RS512, ES256 …). Falls back to `JWT_PUBLIC_KEY` env var. Takes precedence over `secret` when both are present. |
 | `algorithms` | `string[]` | — | Explicit algorithm allowlist. Defaults to `["RS256"]` when `publicKey` is used, `["HS256"]` otherwise. Recommended to prevent algorithm-confusion attacks. |
+| `jwksUri` | `string` | — | JWKS endpoint for public-key lookup using the token header's `kid`. Takes precedence over static keys; asymmetric default algorithm is `RS256`. |
+| `forwardClaims` | `Record<string, string>` | — | Map verified claim names to outgoing header names, e.g. `{ "sub": "X-User-ID" }`. Values are converted to strings. |
+
+For enabled JWT routes loaded from JSON, the schema requires at least one inline `secret`, `publicKey`, or `jwksUri`. Runtime environment fallbacks alone do not satisfy this validation rule.
 
 **`"apiKey"` — Header-based API key**
 
@@ -303,6 +325,7 @@ Stops forwarding requests to a failing upstream after a configurable number of c
 | `timeout` | `number` | ✅ | Milliseconds the circuit stays open before transitioning to half-open and sending a probe request. |
 | `successThreshold` | `number` | — | Consecutive probe successes required to close the circuit (default: `1`). |
 | `healthCheck` | `HealthCheck` | — | Active health-check probe that pings a URL while the circuit is open to accelerate recovery. |
+| `fallback` | `{ status?: number; body?: unknown; headers?: Record<string, string> }` | — | Response when the circuit rejects a request. Status defaults to 503; an omitted body produces an empty response. `Retry-After` is still set unless overridden by fallback headers. |
 
 **`HealthCheck`**
 
@@ -323,6 +346,8 @@ Restricts access to a route based on the client's IP address. At least one of `a
 
 Both fields accept plain IPv4 addresses (`192.168.1.1`) and CIDR notation (`10.0.0.0/8`). IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1`) are normalised to their IPv4 form before matching, so you never need to list both forms.
 
+Native IPv6 addresses and CIDRs are also supported, such as `::1` and `2001:db8::/32`; allow and deny lists can contain both address families.
+
 #### `Retry`
 
 Automatically retries failed upstream requests (5xx responses or network errors) before returning a failure to the client. The upstream is called up to `attempts + 1` times total. See [Retry with Backoff](#retry-with-backoff) for a full explanation.
@@ -331,8 +356,11 @@ Automatically retries failed upstream requests (5xx responses or network errors)
 |---|---|---|---|
 | `attempts` | `number (1–10)` | ✅ | Maximum number of retry attempts after the first failure. |
 | `delay` | `number` | ✅ | Base delay in milliseconds between retries. |
-| `backoff` | `"fixed" \| "exponential"` | — | Backoff strategy. `"fixed"` waits `delay` ms every time. `"exponential"` multiplies the wait on each attempt (`delay × multiplier^n`). Defaults to `"fixed"`. |
+| `backoff` | `"fixed" \| "exponential" \| "exponential-jitter"` | — | Accepted strategy names; see the current backend limitation under [Backoff strategies](#backoff-strategies). |
 | `retryOn` | `number[]` | — | Explicit list of HTTP status codes that should trigger a retry (e.g. `[500, 502, 503]`). When omitted, all 5xx responses are retried. Each code must be in the 400–599 range. |
+| `retryMethods` | `string[]` | — | Methods eligible for HTTP-status retries; defaults to `GET`, `HEAD`, and `OPTIONS`. Network errors currently retry independently of this list. |
+| `fallback` | `{ status?: number; body?: unknown }` | — | Response for thrown proxy/retry errors. Status defaults to 502. Does not replace a final HTTP error response returned by the upstream. |
+| `collapseRequests` | `boolean` | — | Share concurrent `GET`, `HEAD`, or `OPTIONS` work by method and URL. Defaults to false. Headers and caller identity are not part of the key. |
 
 #### `Cache`
 
@@ -402,7 +430,8 @@ Overrides the global CORS policy for a specific route, including preflight `OPTI
     },
     "auth": {
       "enabled": true,
-      "strategy": "jwt"
+      "strategy": "jwt",
+      "secret": "example-signing-secret"
     }
   },
   {
@@ -513,19 +542,20 @@ Protect a route with a Bearer token. The gateway validates the token signature; 
   "proxy": { "target": "http://orders-service:3002", "changeOrigin": true },
   "auth": {
     "enabled": true,
-    "strategy": "jwt"
+    "strategy": "jwt",
+    "secret": "super-secret-key-change-in-production"
   }
 }
 ```
 
-The signing key is resolved in this order:
+When `jwksUri` is configured, keys are resolved from that endpoint using the token's `kid`. Otherwise, the signing key is resolved in this order:
 
 1. `publicKey` field in the route config (PEM — use for RS256 / ES256)
 2. `JWT_PUBLIC_KEY` environment variable
 3. `secret` field in the route config (string — use for HS256)
 4. `JWT_SECRET` environment variable
 
-`publicKey` always takes precedence over `secret`. If neither is present the gateway returns `401`.
+`publicKey` takes precedence over `secret` for static-key verification. Enabled JSON routes must explicitly include `secret`, `publicKey`, or `jwksUri` to pass startup validation; environment variables alone are insufficient.
 
 **HMAC (HS256) — shared secret:**
 
@@ -651,7 +681,7 @@ Validate opaque Bearer tokens by calling an RFC 7662 token introspection endpoin
 | `clientId` | `string` | ✅ | Client ID used for HTTP Basic auth against the introspection endpoint. |
 | `clientSecret` | `string` | ✅ | Client secret used for HTTP Basic auth against the introspection endpoint. |
 | `tokenTypeHint` | `string` | — | `token_type_hint` parameter sent with the introspection request (default: `"access_token"`). |
-| `introspectionCacheTtlMs` | `number` | — | When set, successful (`active: true`) introspection results are cached for this many milliseconds, reducing round-trips for high-traffic routes. Inactive tokens are never cached so revocations take effect immediately. |
+| `introspectionCacheTtlMs` | `number` | — | Positive TTL in milliseconds for successful introspection results. Inactive results are not cached; a previously active token may remain accepted until its cached result expires, even after revocation or token expiry. Omit to introspect every request. |
 
 **How it works:**
 
@@ -679,6 +709,152 @@ curl http://localhost:3000/protected \
 > **Tip:** Use `introspectionCacheTtlMs` to avoid hammering your auth server on high-traffic routes. Set it to a value shorter than your token expiry (e.g. 60 seconds) to keep revocation lag acceptable.
 
 ---
+
+### JWKS and Forwarded Claims
+
+Use a JWKS endpoint instead of embedding a public key, and map verified claims into upstream headers:
+
+```json
+{
+  "baseURL": "/identity",
+  "proxy": { "target": "http://identity-service:3001" },
+  "auth": {
+    "enabled": true,
+    "strategy": "jwt",
+    "jwksUri": "https://issuer.example.com/.well-known/jwks.json",
+    "algorithms": ["RS256"],
+    "forwardClaims": { "sub": "X-User-ID", "tenant": "X-Tenant-ID" }
+  }
+}
+```
+
+Tokens must carry a `kid` header matching a published key. Keys are cached in-process. An unknown `kid` triggers a refresh subject to a 60-second cooldown; cached keys have no fixed expiry. `jwksUri` takes precedence over `publicKey` and `secret`.
+
+Claim forwarding runs after verification. Present, non-null claims overwrite the mapped request headers; missing claims leave existing headers unchanged. An upstream should not treat a mapped header as proof that a missing claim was verified. `headers.request` transforms run later and can override forwarded values.
+
+### Authentication Failure Limiting
+
+Every auth strategy accepts `authRateLimit`:
+
+```json
+{
+  "baseURL": "/admin",
+  "proxy": { "target": "http://admin-service:3001" },
+  "auth": {
+    "enabled": true,
+    "strategy": "basicAuth",
+    "credentials": [{ "username": "alice", "password": "example-password" }],
+    "authRateLimit": { "max": 5, "windowMs": 60000 }
+  }
+}
+```
+
+The route tracks JSON 401 responses by client IP. After five failures, subsequent requests from that IP return 429 until the window expires, including requests with valid credentials. This is separate from ordinary `rateLimit`, which counts requests. Counters live in-process per route and reset when the middleware is rebuilt. Try [the Basic Auth example](examples/basic-auth/).
+
+## Request Validation
+
+The optional `validation` block runs before webhook verification and authentication:
+
+```json
+{
+  "baseURL": "/contacts",
+  "proxy": { "target": "http://localhost:4071" },
+  "validation": {
+    "allowedContentTypes": ["application/json"],
+    "requiredFields": ["name", "email"],
+    "maxBodyBytes": 1024
+  }
+}
+```
+
+| Field | Behavior | Rejection status |
+| --- | --- | --- |
+| `allowedContentTypes` | Case-insensitive substring match against the Content-Type header; an empty list disables this check | 415 |
+| `requiredFields` | Requires an object body with non-null, defined top-level fields; does not validate field types or nested paths | 422 |
+| `maxBodyBytes` | Positive integer compared against Content-Length when that header is present | 413 |
+
+Checks run in the order above except that size is checked before required fields. They apply to every request on the route, including GET requests. The per-route size check does not measure chunked bodies; the Express parser's own limits still apply. See [the validation example](examples/validation/).
+
+## Webhook Verification
+
+Set `webhook` to verify incoming signatures before forwarding. The gateway retains raw body bytes through its body parser and compares signatures with a timing-safe helper.
+
+```json
+{
+  "baseURL": "/webhooks/github",
+  "proxy": { "target": "http://localhost:4072" },
+  "webhook": { "provider": "github", "secret": "example-webhook-secret" }
+}
+```
+
+| Provider | Signature header | Signed content and encoding |
+| --- | --- | --- |
+| `github` | `x-hub-signature-256` | HMAC-SHA256 of raw body; header value `sha256=<hex>` |
+| `stripe` | `stripe-signature` | HMAC-SHA256 of `<timestamp>.<UTF-8 body>`; header `t=<timestamp>,v1=<hex>` |
+| `custom` | Required `headerName`, normalized to lowercase | Raw-body HMAC hex digest using `hashAlgorithm` (default `sha256`) |
+
+All providers require a nonempty `secret`. GitHub and Stripe use fixed headers and algorithms; optional `headerName` and `hashAlgorithm` values are ignored for those providers. Custom configuration looks like:
+
+```json
+{
+  "provider": "custom",
+  "secret": "example-webhook-secret",
+  "headerName": "X-Example-Signature",
+  "hashAlgorithm": "sha256"
+}
+```
+
+Missing or invalid signatures return 401. Unavailable raw body returns 400. Stripe currently checks the first `t` and `v1` entries only and does not enforce timestamp freshness or replay prevention.
+
+The library exports `WebhookConfig` as a discriminated union of `GitHubWebhookConfig`, `StripeWebhookConfig`, and `CustomWebhookConfig`, plus `WebhookProvider`. Provider verifier classes own header and signature rules; `WebhookMiddlewareFactory` delegates through a verifier resolver.
+
+Run `bash examples/run.sh webhook`, then `node examples/webhook/send.js github` (or `stripe` / `custom`). The [example](examples/webhook/) includes its own upstream event receiver.
+
+## Upstream Request Signing
+
+`proxy.upstreamAuth` signs the outgoing request body so the upstream can check that it was sent by a holder of the shared secret:
+
+```json
+{
+  "baseURL": "/signed",
+  "proxy": {
+    "target": "http://localhost:4074",
+    "pathRewrite": { "^/signed": "" },
+    "upstreamAuth": {
+      "type": "hmac-sha256",
+      "secret": "example-upstream-secret",
+      "header": "x-gateway-signature"
+    }
+  },
+  "retry": { "attempts": 1, "delay": 0 }
+}
+```
+
+`type` and `secret` are required. The optional header defaults to `x-gateway-signature` and carries a lowercase hex HMAC-SHA256 digest with no prefix. The signature covers the bytes serialized for the upstream, which may differ from the original JSON formatting. It does not cover the URL, method, or timestamp.
+
+Signing is currently implemented only by the retry backend: a `retry` block is required, and this backend does not proxy WebSocket upgrades. `attempts: 1` allows one retry after the initial request; it does not disable retries. See [the signing example](examples/upstream-signing/) for an upstream that checks signatures and rejects unsigned direct requests.
+
+## Traffic Mirroring
+
+`proxy.mirror` copies traffic to another upstream for shadow testing:
+
+```json
+{
+  "baseURL": "/mirrored",
+  "proxy": {
+    "target": "http://localhost:4075",
+    "pathRewrite": { "^/mirrored": "" },
+    "mirror": { "target": "http://localhost:4076", "percentage": 100 }
+  },
+  "retry": { "attempts": 1, "delay": 0 }
+}
+```
+
+`target` is required; `percentage` accepts 0–100 and defaults to 100. The retry backend dispatches the mirror after writing a returned primary response. Thrown primary errors do not trigger mirroring. The client does not wait for the shadow response, and mirror failures are logged at debug level.
+
+Mirror requests use the route's path rewrite and serialized body. They do not apply `proxy.upstreamAuth` or `headers.request` transforms; incoming request headers are otherwise forwarded after transport header filtering. Choose a shadow target that is appropriate for that data. Like signing, mirroring requires a `retry` block and does not support WebSocket upgrades.
+
+The [mirroring example](examples/traffic-mirroring/) has separate primary and shadow JavaScript services. Send a request to `/mirrored`, then inspect `http://localhost:4076/stats` to see the shadow request count.
 
 ## Request Timeout per Route
 
@@ -832,7 +1008,7 @@ Circuit breaking and rate limiting are independent and can be applied to the sam
 
 ## Load Balancing
 
-Distribute traffic across multiple upstream instances by replacing the single `proxy.target` string with a `proxy.targets` array. Three strategies are supported.
+Distribute traffic across multiple upstream instances by replacing the single `proxy.target` string with a `proxy.targets` array. Four strategies are supported.
 
 ### Strategies
 
@@ -912,14 +1088,17 @@ Distribute traffic across multiple upstream instances by replacing the single `p
 }
 ```
 
-`stickyKey` accepts four formats:
+`stickyKey` is required for sticky routes and accepts five formats:
 
 | Format | Example | Behaviour |
 |---|---|---|
 | `"ip"` | `"ip"` | Client IP address. |
-| `"header:<name>"` | `"header:X-Session-ID"` | Value of the named request header. Default when `stickyKey` is omitted. |
+| `"header:<name>"` | `"header:X-Session-ID"` | Value of the named request header. |
 | `"jwt:<claim>"` | `"jwt:sub"` | Claim extracted from the decoded JWT Bearer token. |
 | `"cookie:<name>"` | `"cookie:session_id"` | Value of the named cookie. |
+| `"query:<name>"` | `"query:session"` | String query parameter; repeated or structured values are ignored. |
+
+Cookie keys require middleware that populates `req.cookies`; the standalone gateway does not install `cookie-parser`. Sticky mappings reset on restart or route reload. JWT key extraction decodes claims; use JWT authentication on the route when the key must come from a verified token.
 
 When the key source is absent (no cookie, no header, anonymous request) the gateway falls back to round-robin for that single request and pins the chosen target if a key becomes available on subsequent calls.
 
@@ -1039,7 +1218,7 @@ curl -si http://localhost:3000/inventory \
 
 ## IP Allowlist / Blocklist
 
-Restrict access to any route by the client's IP address. Both exact IPv4 addresses and CIDR ranges are supported. `deny` and `allow` can be combined on the same route.
+Restrict access to any route by the client's IP address. Exact IPv4 and IPv6 addresses and CIDR ranges are supported. `deny` and `allow` can be combined on the same route.
 
 ### Evaluation order
 
@@ -1095,7 +1274,7 @@ IPv4-mapped IPv6 addresses (`::ffff:192.168.1.1`) are silently normalised to the
 
 ### Combining with other features
 
-IP filtering runs as the **first middleware** on a route, before authentication and rate limiting. A blocked request never reaches the auth check and does not count against rate limit counters.
+IP filtering runs after per-route CORS and before validation, authentication, and rate limiting. A blocked request never reaches the auth check and does not count against rate limit counters.
 
 ```json
 {
@@ -1131,7 +1310,7 @@ Automatically retry failed upstream requests before returning a failure to the c
 }
 ```
 
-With `attempts: 3` and `backoff: "exponential"`, the gateway tries the upstream up to 4 times total (1 initial + 3 retries). The delays between attempts are 200 ms, 400 ms, 800 ms.
+With `attempts: 3`, the gateway calls the upstream up to 4 times total (1 initial + 3 retries), subject to HTTP method eligibility. See the backend limitation below for delay behavior.
 
 ### Backoff strategies
 
@@ -1139,6 +1318,35 @@ With `attempts: 3` and `backoff: "exponential"`, the gateway tries the upstream 
 |---|---|---|
 | `"fixed"` | `delay` | 200 ms, 200 ms, 200 ms |
 | `"exponential"` | `delay × 2^n` | 200 ms, 400 ms, 800 ms |
+| `"exponential-jitter"` | Uniform random value below `delay × 2^n` | Below 200 ms, 400 ms, 800 ms |
+
+The exponential strategies use `RETRY_BACKOFF_MULTIPLIER` (default 2). These strategy classes exist, but the current route backend constructs `RetryExecutor` with its default `FixedBackoff`; selecting `backoff` in route JSON does not yet change the actual delays. A custom executor can receive an explicit strategy.
+
+### Retry methods, fallback, and request collapsing
+
+By default, only GET, HEAD, and OPTIONS responses are eligible for HTTP-status retries. Set `retryMethods` to opt other methods in. Network errors currently retry regardless of `retryMethods`, so this option is not a guarantee against repeating a write after a transport failure.
+
+```json
+{
+  "baseURL": "/public-catalog",
+  "proxy": { "target": "http://catalog-service:3001" },
+  "retry": {
+    "attempts": 2,
+    "delay": 100,
+    "retryOn": [502, 503, 504],
+    "retryMethods": ["GET", "HEAD"],
+    "collapseRequests": true,
+    "fallback": {
+      "status": 503,
+      "body": { "message": "Catalog temporarily unavailable" }
+    }
+  }
+}
+```
+
+`fallback` handles thrown proxy/retry errors, such as exhausted network failures. A final HTTP response from the upstream is forwarded, even when its status is retryable; it does not activate this fallback. Circuit-breaker `fallback` is separate and applies when its guard rejects a request.
+
+`collapseRequests` shares one in-flight execution among concurrent GET, HEAD, or OPTIONS requests with the same method and URL. It is not response caching. The key excludes authorization, cookies, headers, and body, so enable it only where those differences cannot change the response, such as a public catalog. Shared requests also use the initiating execution's abort signal.
 
 ### Response when all attempts fail
 
@@ -1576,6 +1784,8 @@ src/apps/api-gateway/
 │       ├── cache.schema.ts
 │       ├── headers.schema.ts
 │       ├── route-cors.schema.ts
+│       ├── validation.schema.ts
+│       ├── webhook.schema.ts
 │       └── gateway.schema.ts
 │
 └── types/
@@ -1589,14 +1799,28 @@ src/apps/api-gateway/
     ├── retry.d.ts            # RetryConfig type
     ├── cache.d.ts            # CacheConfig type
     ├── headers.d.ts          # HeadersConfig, HeaderTransform types
-    └── route-cors.d.ts       # RouteCors type
+    ├── route-cors.d.ts       # RouteCors type
+    ├── validation.d.ts       # ValidationConfig type
+    └── webhook.d.ts          # Provider-specific webhook config union
 ```
 
 ---
 
 ## Example Projects
 
-`examples/` contains self-contained demos that start upstream services and a gateway covering all features.
+`examples/` contains 20 standalone demos for the main gateway features. Each project has its own JavaScript upstream entry point and route configuration, with reusable HTTP utilities in `examples/shared/`.
+
+```bash
+bash examples/run.sh --list
+bash examples/run.sh validation
+bash examples/webhook/run.sh
+```
+
+The shared launcher builds the gateway, checks port availability, waits for upstream readiness, and tracks its own child processes for cleanup. It never kills unrelated processes or overwrites `.env`. Use `GATEWAY_PORT=3100 bash examples/run.sh basic` to change the gateway port. Upstream ports and combined-mode overrides live in `examples/shared/services.json`.
+
+The new projects include local services for Basic Auth (`upstream-protected.js`), validation (`upstream-contacts.js`), webhooks (`upstream-events.js`), timeouts (`upstream-slow.js`), signing (`upstream-signed.js`), and mirroring (`upstream-primary.js` and `upstream-shadow.js`). The webhook project also includes `send.js` to generate signed requests for all three providers.
+
+See [the examples guide](examples/README.md) for request commands and expected statuses. Existing `walkthrough.sh` files print standalone walkthroughs. To verify the examples after building, run `node examples/shared/smoke.js`; it checks combined HTTP behavior, occupied-port handling, and startup/shutdown of all standalone projects.
 
 ### Run all examples together
 
@@ -1621,7 +1845,7 @@ Compiles the gateway and starts all services with shared example settings, witho
 | `http://localhost:3000/analytics/internal` | IP filter | Analytics service — allow: `127.0.0.1` |
 | `http://localhost:3000/catalog` | Load balancing | Catalog service — round-robin across A, B, C |
 | `ws://localhost:3000/chat` | WebSocket | Chat service — WS echo server |
-| `http://localhost:3000/retry-inventory` | Retry with backoff | Inventory service — 3 attempts, exponential |
+| `http://localhost:3000/retry-inventory` | Retry with backoff | Inventory service — up to 3 retries; current backend uses fixed delays |
 | `http://localhost:3000/cached-catalog` | Response caching | Catalog service — TTL 30 s, GET/HEAD |
 | `http://localhost:3000/metrics-orders` | Prometheus + cache | Orders service — cached, drives counters |
 | `http://localhost:3000/echo` | Header transformation | Echo server — shows upstream-received headers |
@@ -1629,6 +1853,12 @@ Compiles the gateway and starts all services with shared example settings, witho
 | `http://localhost:3000/restricted-api` | Route-level CORS | `origin: trusted.example.com` |
 | `http://localhost:3000/oauth2-auth/login` | OAuth 2.0 | Issues opaque tokens |
 | `http://localhost:3000/oauth2-protected` | OAuth 2.0 | Token introspection required |
+| `http://localhost:3000/basic-auth` | Basic Auth | Credentials and authentication failure limiting |
+| `http://localhost:3000/validated` | Validation | Required name/email, JSON content type, declared size limit |
+| `http://localhost:3000/webhooks/github` | Webhooks | Signed GitHub events; also `/webhooks/stripe` and `/webhooks/custom` |
+| `http://localhost:3000/slow` | Timeout | 100 ms deadline against a 500 ms upstream |
+| `http://localhost:3000/signed` | Upstream signing | HMAC checked by the upstream |
+| `http://localhost:3000/mirrored` | Mirroring | Shadow statistics at `http://localhost:4076/stats` |
 
 ### Public routes
 
@@ -1812,6 +2042,9 @@ Express app / raw HTTP server
   │
   ├─ cors (per-route)       optional — handles preflight (OPTIONS → 204) and overrides global CORS
   ├─ ipFilter               per-route — IP allow/deny check → 403 on block
+  ├─ body validation        per-route — content type, declared size, required fields
+  ├─ webhook verification   per-route — provider HMAC signature check → 401 on failure
+  ├─ auth failure limiter   per-route — blocks IPs after repeated 401 responses → 429
   ├─ authMiddleware         per-route — JWT / API key / Basic / OAuth2 check → 401 on failure
   ├─ express-rate-limit     per-route request throttling → 429 on exceeded
   ├─ circuit breaker guard  per-route — rejects with 503 when circuit is OPEN
@@ -1820,6 +2053,8 @@ Express app / raw HTTP server
   ├─ timeout middleware     per-route — sends 504 if upstream doesn't respond in time
   │
   ├─ retry proxy            per-route (retry routes) — buffers response; retries 5xx / errors
+  │    ├─ upstream signing  optional HMAC of the serialized body
+  │    └─ traffic mirror    optional asynchronous shadow request after the primary response
   │
   ├─ http-proxy-middleware  proxies request to upstream; load balancer selects target
   │    ├─ router()          load balancer pick (round-robin / weighted / least-connections)

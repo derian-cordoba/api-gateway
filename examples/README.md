@@ -86,7 +86,7 @@ curl -i http://localhost:3000/mirrored -H 'Content-Type: application/json' -d '{
 curl -s http://localhost:4076/stats
 ```
 
-Signing and mirroring currently use the gateway's retry backend, so those routes set `retry.attempts: 1` to select it without repeating requests. Stripe verification follows the current gateway implementation and does not enforce timestamp freshness.
+Signing and mirroring currently use the gateway's retry backend, so those routes set `retry.attempts: 1` to select it. This allows one retry after the initial request; it does not disable retries. HTTP-status retries default to GET, HEAD, and OPTIONS, while network failures can retry other methods too. Stripe verification follows the current gateway implementation and does not enforce timestamp freshness.
 
 To run the automated HTTP smoke checks after compiling the gateway:
 
