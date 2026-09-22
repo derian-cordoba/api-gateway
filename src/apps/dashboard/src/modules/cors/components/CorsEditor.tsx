@@ -10,6 +10,7 @@ import {
   TextInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["cors"]>;
 type OriginMode = "single" | "multiple" | "reflect" | "disabled";
@@ -22,7 +23,7 @@ export function CorsEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { origin: "*" };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
   const mode: OriginMode = Array.isArray(config.origin)
     ? "multiple"
     : config.origin === true

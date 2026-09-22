@@ -9,6 +9,7 @@ import { ProxyManager } from "./ProxyManager";
 import type { Gateway } from "../types/gateway"
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
+import { toError } from "../../../shared/errors/toError";
 
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
@@ -75,7 +76,7 @@ export class RouteReloader {
       logger.info("Routes reloaded successfully");
       this.onReloaded?.(routes);
     } catch (err) {
-      logger.error({ err }, "Failed to reload routes — keeping current config");
+      logger.error({ err: toError(err) }, "Failed to reload routes — keeping current config");
     }
   }
 
@@ -114,7 +115,7 @@ export class RouteReloader {
       this.watcher.on("error", (err) => logger.warn({ err }, "Routes file watcher error"));
       logger.info({ filePath, directoryPath }, "Watching routes file for changes");
     } catch (err) {
-      logger.warn({ err, filePath }, "Could not watch routes file — file-based reload disabled");
+      logger.warn({ err: toError(err), filePath }, "Could not watch routes file — file-based reload disabled");
     }
   }
 }

@@ -4,6 +4,7 @@ import { Router } from "./routes/Router";
 import { GatewayEventBus } from "./middleware/GatewayEventBus";
 import { appEnv } from "./config/app-env";
 import { logger } from "./logger";
+import { isErrorWithCode } from "../../shared/errors/isErrorWithCode";
 
 export class Server {
   private readonly app: Express;
@@ -91,7 +92,7 @@ export class Server {
 
     return new Promise((resolve: (value: void | PromiseLike<void>) => void) => {
       this.httpServer.close((error: Error | undefined) => {
-        if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") {
+        if (error && !isErrorWithCode(error, "ERR_SERVER_NOT_RUNNING")) {
           logger.warn({ err: error }, "Error while stopping server");
         } else {
           logger.info("Gateway stopped");

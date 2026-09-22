@@ -1,5 +1,6 @@
 import { GatewaysSchema } from "@gateway/routes/validators/gateway.schema";
 import type { ConfigurationWarning, GatewayRoute } from "./configuration.types";
+import { findRoutePrefixConflicts } from "@shared/routes/findRoutePrefixConflicts";
 
 export type ValidationIssue = {
   path: Array<string | number>;
@@ -31,25 +32,10 @@ export function validateConfiguration(input: unknown): ValidationResult {
 }
 
 function findPrefixWarnings(routes: GatewayRoute[]): ConfigurationWarning[] {
-  const warnings: ConfigurationWarning[] = [];
-
-  for (let left = 0; left < routes.length; left += 1) {
-    for (let right = left + 1; right < routes.length; right += 1) {
-      const first = routes[left].baseURL;
-      const second = routes[right].baseURL;
-      const exact = first === second;
-      const nested = first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
-
-      if (exact || nested) {
-        warnings.push({
-          path: [right, "baseURL"],
-          message: exact
-            ? `Duplicate route prefix: ${second}`
-            : `Route prefixes ${first} and ${second} overlap; route order can affect matching.`,
-        });
-      }
-    }
-  }
-
-  return warnings;
+  return findRoutePrefixConflicts(routes).map((conflict) => ({
+    path: [conflict.secondIndex, "baseURL"],
+    message: conflict.exact
+      ? `Duplicate route prefix: ${conflict.secondPrefix}`
+      : `Route prefixes ${conflict.firstPrefix} and ${conflict.secondPrefix} overlap; route order can affect matching.`,
+  }));
 }

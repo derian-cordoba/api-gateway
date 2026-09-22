@@ -11,6 +11,7 @@ import {
   StringListInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["headers"]>;
 
@@ -23,7 +24,7 @@ export function HeadersEditor({
 }) {
   const config = value ?? { request: { set: { "X-Forwarded-By": "api-gateway" } } };
   const updateSide = (side: "request" | "response", transform?: HeaderTransform) => {
-    const next = { ...config, [side]: transform };
+    const next = omitUndefined({ ...config, [side]: transform });
     onChange(next);
   };
 
@@ -73,14 +74,14 @@ function TransformPanel({
             <h3>Set headers</h3>
             <KeyValueEditor
               value={value.set}
-              onChange={(set) => onChange({ ...value, set })}
+              onChange={(set) => onChange(omitUndefined({ ...value, set }))}
               keyPlaceholder="Header name"
             />
           </div>
           <FormField label="Remove headers">
             <StringListInput
               value={value.remove}
-              onChange={(remove) => onChange({ ...value, remove })}
+              onChange={(remove) => onChange(omitUndefined({ ...value, remove }))}
               placeholder="Server"
             />
           </FormField>

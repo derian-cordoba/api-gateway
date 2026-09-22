@@ -14,6 +14,7 @@ import { HopByHopHeaderFilter } from "../../middleware/retry/HopByHopHeaderFilte
 import { RetryExhaustedException } from "../../middleware/retry/RetryExhaustedException";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
 import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 
 /**
  * Proxy backend with automatic retry on upstream failures.
@@ -103,7 +104,7 @@ export class RetryProxyBackend implements ProxyBackend {
     mirrorClient.send({ target: mirrorConfig.target, req, body }).catch((mirrorError: unknown) => {
       // Mirror failures must never affect primary traffic — logged at debug level only.
       logger.debug(
-        { baseURL: this.route.baseURL, mirrorTarget: mirrorConfig.target, err: mirrorError },
+        { baseURL: this.route.baseURL, mirrorTarget: mirrorConfig.target, err: toError(mirrorError) },
         "Mirror request failed",
       );
     });
@@ -142,7 +143,7 @@ export class RetryProxyBackend implements ProxyBackend {
     }
 
     res.status(HttpStatus.BAD_GATEWAY).json(
-      ErrorResponseFactory.badGateway((err as Error).message ?? "Unknown upstream error"),
+      ErrorResponseFactory.badGateway(toError(err).message),
     );
   }
 }

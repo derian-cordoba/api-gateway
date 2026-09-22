@@ -4,6 +4,7 @@ import { HeaderKeyExtractor } from "./HeaderKeyExtractor";
 import { JwtClaimKeyExtractor } from "./JwtClaimKeyExtractor";
 import { CookieKeyExtractor } from "./CookieKeyExtractor";
 import { QueryParamKeyExtractor } from "./QueryParamKeyExtractor";
+import { assertNever } from "../../../../shared/assertions/assertNever";
 
 // ── Discriminated spec type ──────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ export class RequestKeyExtractorFactory {
       case "jwt":    return new JwtClaimKeyExtractor(parsed.claim);
       case "cookie": return new CookieKeyExtractor(parsed.name);
       case "query":  return new QueryParamKeyExtractor(parsed.name);
+      default:        return assertNever(parsed, "request key extractor");
     }
   }
 }

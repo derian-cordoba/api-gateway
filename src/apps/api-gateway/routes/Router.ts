@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import type { Gateway } from "../types/gateway";
 import express, {
   Router as ExpressRouter,
@@ -18,6 +19,8 @@ import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requestId";
+import { toError } from "../../../shared/errors/toError";
+import { getHeaderValue } from "../../../shared/http/getHeaderValue";
 
 export class Router {
   private readonly router: ExpressRouter;
@@ -50,7 +53,12 @@ export class Router {
     this.router.use(createRequestIdMiddleware());
 
     // Structured HTTP request logging — reuse the request ID set above
-    this.router.use(pinoHttp({ logger, genReqId: (req) => req.headers[REQUEST_ID_HEADER] as string }));
+    this.router.use(
+      pinoHttp({
+        logger,
+        genReqId: (req) => getHeaderValue(req.headers[REQUEST_ID_HEADER]) ?? randomUUID(),
+      }),
+    );
 
     // Security headers (full helmet defaults)
     this.router.use(helmet());
@@ -112,7 +120,8 @@ export class Router {
 
   private configureErrorHandler(): void {
     this.router.use(
-      (error: Error, _req: Request, res: Response, _next: NextFunction): void => {
+      (cause: unknown, _req: Request, res: Response, _next: NextFunction): void => {
+        const error = toError(cause);
         logger.error({ err: error }, "Unhandled error");
         res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
           error: "Internal Server Error",

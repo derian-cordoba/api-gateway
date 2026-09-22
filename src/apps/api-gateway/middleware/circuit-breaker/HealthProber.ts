@@ -1,6 +1,7 @@
 import type { HealthCheckConfig } from "../../types/circuit-breaker";
 import type { CircuitBreaker } from "./CircuitBreaker";
 import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 
@@ -58,7 +59,7 @@ export class HealthProber {
         this.breaker.recordFailure();
       }
     } catch (err) {
-      logger.debug({ url: this.config.url, err }, "Health probe failed");
+      logger.debug({ url: this.config.url, err: toError(err) }, "Health probe failed");
       this.breaker.recordFailure();
     }
   }

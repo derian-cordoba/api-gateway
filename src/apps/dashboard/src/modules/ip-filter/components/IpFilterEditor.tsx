@@ -3,6 +3,7 @@
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import { FormField, StringListInput } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["ipFilter"]>;
 
@@ -26,14 +27,14 @@ export function IpFilterEditor({
         <FormField label="Allowed addresses" hint="When set, all other addresses are rejected.">
           <StringListInput
             value={config.allow}
-            onChange={(allow) => onChange({ ...config, allow })}
+            onChange={(allow) => onChange(omitUndefined({ ...config, allow }))}
             placeholder="10.0.0.0/8"
           />
         </FormField>
         <FormField label="Denied addresses" hint="Denied addresses are evaluated first.">
           <StringListInput
             value={config.deny}
-            onChange={(deny) => onChange({ ...config, deny })}
+            onChange={(deny) => onChange(omitUndefined({ ...config, deny }))}
             placeholder={"192.0.2.1\n2001:db8::/32"}
           />
         </FormField>

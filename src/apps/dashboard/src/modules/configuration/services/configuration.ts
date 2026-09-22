@@ -3,6 +3,8 @@ import type {
   StoredConfiguration,
   ValidationIssue,
 } from "../types/configuration.types";
+import { withErrorContext } from "@shared/errors/withErrorContext";
+import { toError } from "@shared/errors/toError";
 
 export type DashboardStatus = {
   status: string;
@@ -123,20 +125,30 @@ export class ConfigurationService {
 
   readonly export = async (): Promise<void> => {
     try {
-      const response = await fetch("/api/config/export", {
-        cache: "no-store",
-        headers: this.getHeaders(false),
-      });
-      if (!response.ok) {
-        throw new DashboardApiError("Could not export configuration.", response.status);
-      }
+      await withErrorContext(
+        async () => {
+          const response = await fetch("/api/config/export", {
+            cache: "no-store",
+            headers: this.getHeaders(false),
+          });
+          if (!response.ok) {
+            throw new DashboardApiError("Could not export configuration.", response.status);
+          }
 
-      const url = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "routes.json";
-      link.click();
-      URL.revokeObjectURL(url);
+          const url = URL.createObjectURL(await response.blob());
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "routes.json";
+          link.click();
+          URL.revokeObjectURL(url);
+        },
+        {
+          createException: (cause) =>
+            cause instanceof DashboardApiError
+              ? cause
+              : new Error("Could not export configuration."),
+        },
+      );
     } catch (caught) {
       this.setConfigurationState({
         error: normalizeError(caught, "Could not export configuration."),
@@ -211,29 +223,39 @@ export class ConfigurationService {
   }
 
   private async request<T>(path: string, init: RequestInit = {}, jsonRequest = true): Promise<T> {
-    const response = await fetch(path, {
-      ...init,
-      cache: "no-store",
-      headers: {
-        ...this.getHeaders(jsonRequest),
-        ...init.headers,
+    return withErrorContext(
+      async () => {
+        const response = await fetch(path, {
+          ...init,
+          cache: "no-store",
+          headers: {
+            ...this.getHeaders(jsonRequest),
+            ...init.headers,
+          },
+        });
+        const payload = (await response.json()) as T & {
+          message?: string;
+          error?: string;
+          issues?: ValidationIssue[];
+        };
+
+        if (!response.ok) {
+          throw new DashboardApiError(
+            payload.message ?? payload.error ?? "Dashboard request failed.",
+            response.status,
+            payload.issues,
+          );
+        }
+
+        return payload;
       },
-    });
-    const payload = (await response.json()) as T & {
-      message?: string;
-      error?: string;
-      issues?: ValidationIssue[];
-    };
-
-    if (!response.ok) {
-      throw new DashboardApiError(
-        payload.message ?? payload.error ?? "Dashboard request failed.",
-        response.status,
-        payload.issues,
-      );
-    }
-
-    return payload;
+      {
+        createException: (cause) =>
+          cause instanceof DashboardApiError
+            ? cause
+            : new Error(`Dashboard request to ${path} failed.`),
+      },
+    );
   }
 
   private getHeaders(jsonRequest: boolean): Record<string, string> {
@@ -256,7 +278,8 @@ export class ConfigurationService {
 }
 
 function normalizeError(caught: unknown, fallback: string): Error {
-  return caught instanceof Error ? caught : new Error(fallback);
+  const error = toError(caught);
+  return caught instanceof Error ? error : new Error(fallback, { cause: error });
 }
 
 export const configurationService = new ConfigurationService();

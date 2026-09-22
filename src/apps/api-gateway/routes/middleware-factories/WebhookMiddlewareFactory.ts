@@ -1,10 +1,12 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import type { Gateway } from "../../types/gateway";
 import type { WebhookConfig } from "../../types/webhook";
 import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
+import { timingSafeStringEqual } from "../../../../shared/security/timingSafeStringEqual";
+import { getHeaderValue } from "../../../../shared/http/getHeaderValue";
 
 export class WebhookMiddlewareFactory implements MiddlewareFactory {
   create(route: Gateway): RequestHandler | null {
@@ -27,7 +29,7 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
       }
 
       const signatureHeaderName = this.resolveSignatureHeaderName(webhookConfig);
-      const signatureHeaderValue = req.headers[signatureHeaderName] as string | undefined;
+      const signatureHeaderValue = getHeaderValue(req.headers[signatureHeaderName]);
 
       if (!signatureHeaderValue) {
         res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.webhookSignatureInvalid());
@@ -87,14 +89,7 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
     const expectedSignature =
       "sha256=" + createHmac("sha256", secret).update(rawBodyBuffer).digest("hex");
 
-    const expectedBuffer = Buffer.from(expectedSignature, "utf-8");
-    const receivedBuffer = Buffer.from(signatureHeaderValue, "utf-8");
-
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(expectedBuffer, receivedBuffer);
+    return timingSafeStringEqual(expectedSignature, signatureHeaderValue);
   }
 
   private verifyStripe(
@@ -122,14 +117,7 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
     const signedPayload = timestamp + "." + rawBodyBuffer.toString("utf-8");
     const expectedSignature = createHmac("sha256", secret).update(signedPayload).digest("hex");
 
-    const expectedBuffer = Buffer.from(expectedSignature, "utf-8");
-    const receivedBuffer = Buffer.from(receivedSignature, "utf-8");
-
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(expectedBuffer, receivedBuffer);
+    return timingSafeStringEqual(expectedSignature, receivedSignature);
   }
 
   private verifyCustom(
@@ -140,13 +128,6 @@ export class WebhookMiddlewareFactory implements MiddlewareFactory {
   ): boolean {
     const expectedSignature = createHmac(algorithm, secret).update(rawBodyBuffer).digest("hex");
 
-    const expectedBuffer = Buffer.from(expectedSignature, "utf-8");
-    const receivedBuffer = Buffer.from(signatureHeaderValue, "utf-8");
-
-    if (expectedBuffer.length !== receivedBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(expectedBuffer, receivedBuffer);
+    return timingSafeStringEqual(expectedSignature, signatureHeaderValue);
   }
 }

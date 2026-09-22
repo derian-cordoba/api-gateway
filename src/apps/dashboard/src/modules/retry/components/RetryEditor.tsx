@@ -11,6 +11,7 @@ import {
   Toggle,
 } from "@/modules/shared/components/FormControls";
 import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["retry"]>;
 
@@ -22,7 +23,7 @@ export function RetryEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { attempts: 3, delay: 250, backoff: "exponential-jitter" as const };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="retry"

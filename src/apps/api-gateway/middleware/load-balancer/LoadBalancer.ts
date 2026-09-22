@@ -5,6 +5,7 @@ import { WeightedSelectionStrategy } from "./WeightedSelectionStrategy";
 import { LeastConnectionsSelectionStrategy } from "./LeastConnectionsSelectionStrategy";
 import { StickySelectionStrategy } from "./StickySelectionStrategy";
 import { RequestKeyExtractorFactory } from "../key-extractors/RequestKeyExtractorFactory";
+import { assertNever } from "../../../../shared/assertions/assertNever";
 
 /**
  * Orchestrates upstream target selection by delegating all picking and
@@ -67,8 +68,9 @@ export class LoadBalancer {
           RequestKeyExtractorFactory.fromSpec(stickyKey ?? "header:X-Session-ID"),
         );
       case "round-robin":
-      default:
         return new RoundRobinSelectionStrategy(targets.map((target) => target.url));
+      default:
+        return assertNever(strategy, "load-balancer strategy");
     }
   }
 }

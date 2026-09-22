@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import type { Gateway } from "../../types/gateway";
 import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
+import { isRecord } from "../../../../shared/guards/isRecord";
 
 export class BodyValidationMiddlewareFactory implements MiddlewareFactory {
   create(route: Gateway): RequestHandler | null {
@@ -44,8 +45,8 @@ export class BodyValidationMiddlewareFactory implements MiddlewareFactory {
 
       // 3. Required fields check (body must be an object — Express has already parsed it)
       if (validationConfig.requiredFields && validationConfig.requiredFields.length > 0) {
-        const requestBody = req.body as Record<string, unknown> | undefined;
-        if (!requestBody || typeof requestBody !== "object") {
+        const requestBody: unknown = req.body;
+        if (!isRecord(requestBody)) {
           res.status(HttpStatus.UNPROCESSABLE_ENTITY).json(
             ErrorResponseFactory.validationError("Request body must be a JSON object"),
           );

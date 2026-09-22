@@ -3,6 +3,7 @@
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import { FormField, SelectInput, TextInput } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["webhook"]>;
 
@@ -14,7 +15,7 @@ export function WebhookEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { provider: "github" as const, secret: "" };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
 
   return (
     <FeatureSection

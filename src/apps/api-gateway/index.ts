@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { App } from "./App";
 import { logger } from "./logger";
+import { toError } from "../../shared/errors/toError";
 
-function handleError(error: Error): void {
+function handleError(cause: unknown): void {
+  const error = toError(cause);
   logger.error({ err: error }, "Fatal startup error");
   process.exit(1);
 }

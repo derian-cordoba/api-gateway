@@ -9,6 +9,8 @@ import { RetryExhaustedException } from "./RetryExhaustedException";
 import { FixedBackoff } from "./FixedBackoff";
 import { InFlightRequestCache } from "./InFlightRequestCache";
 import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
+import { abortableDelay } from "../../../../shared/async/abortableDelay";
 
 /**
  * Orchestrates the retry loop for upstream HTTP requests.
@@ -74,7 +76,7 @@ export class RetryExecutor {
           lastStatus = statusCode;
           lastErr = undefined;
           logger.warn({ baseURL: req.baseUrl, attempt, status: statusCode }, "Upstream returned 5xx — retrying");
-          await this.sleep(attempt, signal);
+          await this.delay(attempt, signal);
           this.selector.onComplete(req);
           continue;
         }
@@ -90,7 +92,7 @@ export class RetryExecutor {
         return upstream;
       } catch (err) {
         this.breaker?.recordFailure();
-        lastErr = err as Error;
+        lastErr = toError(err);
         lastStatus = 0;
 
         if (attempt < this.config.attempts && !signal.aborted) {
@@ -99,7 +101,7 @@ export class RetryExecutor {
             "Upstream network error — retrying",
           );
           try {
-            await this.sleep(attempt, signal);
+            await this.delay(attempt, signal);
           } catch {
             break; // AbortError from sleep — stop immediately
           }
@@ -137,18 +139,8 @@ export class RetryExecutor {
     return ["GET", "HEAD", "OPTIONS"].includes(method);
   }
 
-  private sleep(attemptIndex: number, signal: AbortSignal): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      if (signal.aborted) {
-        reject(new DOMException("Aborted", "AbortError"));
-        return;
-      }
-      const ms = this.backoffStrategy.computeDelay(attemptIndex, this.config.delay);
-      const timer = setTimeout(resolve, ms);
-      signal.addEventListener("abort", () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      });
-    });
+  private delay(attemptIndex: number, signal: AbortSignal): Promise<void> {
+    const milliseconds = this.backoffStrategy.computeDelay(attemptIndex, this.config.delay);
+    return abortableDelay(milliseconds, signal);
   }
 }

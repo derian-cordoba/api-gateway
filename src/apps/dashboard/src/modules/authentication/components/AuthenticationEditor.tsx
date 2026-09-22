@@ -15,6 +15,7 @@ import {
   TextInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Auth = NonNullable<GatewayRoute["auth"]>;
 
@@ -44,7 +45,7 @@ export function AuthenticationEditor({
   onChange: (value?: Auth) => void;
 }) {
   const auth = value ?? defaults.jwt;
-  const update = (patch: Partial<Auth>) => onChange({ ...auth, ...patch } as Auth);
+  const update = (patch: Partial<Auth>) => onChange(omitUndefined({ ...auth, ...patch }) as Auth);
 
   return (
     <FeatureSection
@@ -95,7 +96,7 @@ function JwtFields({
   value: Extract<Auth, { strategy: "jwt" }>;
   onChange: (value: Auth) => void;
 }) {
-  const update = (patch: Partial<typeof value>) => onChange({ ...value, ...patch });
+  const update = (patch: Partial<typeof value>) => onChange(omitUndefined({ ...value, ...patch }));
   return (
     <div className="form-grid form-grid--top-gap">
       <FormField label="HMAC secret" hint="Use one credential source. JWKS takes precedence.">
@@ -158,7 +159,9 @@ function ApiKeyFields({
       <FormField label="Header name">
         <TextInput
           value={value.header ?? ""}
-          onChange={(event) => onChange({ ...value, header: event.target.value || undefined })}
+          onChange={(event) =>
+            onChange(omitUndefined({ ...value, header: event.target.value || undefined }))
+          }
           placeholder="x-api-key"
         />
       </FormField>
@@ -184,7 +187,9 @@ function BasicFields({
       <FormField label="Realm">
         <TextInput
           value={value.realm ?? ""}
-          onChange={(event) => onChange({ ...value, realm: event.target.value || undefined })}
+          onChange={(event) =>
+            onChange(omitUndefined({ ...value, realm: event.target.value || undefined }))
+          }
         />
       </FormField>
       <div className="collection-editor">
@@ -252,7 +257,7 @@ function OAuthFields({
   value: Extract<Auth, { strategy: "oauth2" }>;
   onChange: (value: Auth) => void;
 }) {
-  const update = (patch: Partial<typeof value>) => onChange({ ...value, ...patch });
+  const update = (patch: Partial<typeof value>) => onChange(omitUndefined({ ...value, ...patch }));
   return (
     <div className="form-grid form-grid--top-gap">
       <FormField label="Introspection URL" wide>

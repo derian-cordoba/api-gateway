@@ -3,6 +3,7 @@
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import { FormField, NumberInput, StringListInput } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["validation"]>;
 
@@ -14,7 +15,7 @@ export function ValidationEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { allowedContentTypes: ["application/json"] };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
 
   return (
     <FeatureSection

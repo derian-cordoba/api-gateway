@@ -114,6 +114,19 @@ describe("ConfigurationService", () => {
     });
   });
 
+  it("adds endpoint context to transport failures", async () => {
+    const cause = new TypeError("Failed to fetch");
+    fetchMock.mockRejectedValue(cause);
+    const service = new ConfigurationService();
+
+    await expect(service.reload()).resolves.toBeNull();
+
+    expect(service.getSnapshot().error).toMatchObject({
+      message: "Dashboard request to /api/config failed.",
+      cause,
+    });
+  });
+
   it("maps status request failures to a displayable status", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ message: "A valid dashboard token is required." }, 401),

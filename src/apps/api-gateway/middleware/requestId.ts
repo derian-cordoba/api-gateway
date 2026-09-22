@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { randomUUID } from "node:crypto";
+import { getHeaderValue } from "../../../shared/http/getHeaderValue";
 
 export const REQUEST_ID_HEADER = "x-request-id";
 
@@ -16,7 +17,7 @@ export const REQUEST_ID_HEADER = "x-request-id";
  */
 export function createRequestIdMiddleware(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const requestId = (req.headers[REQUEST_ID_HEADER] as string | undefined) || randomUUID();
+    const requestId = getHeaderValue(req.headers[REQUEST_ID_HEADER]) || randomUUID();
 
     req.headers[REQUEST_ID_HEADER] = requestId;
     res.set(REQUEST_ID_HEADER, requestId);

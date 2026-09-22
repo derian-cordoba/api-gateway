@@ -15,6 +15,8 @@ import { CorsEditor } from "@/modules/cors/components/CorsEditor";
 import { ValidationEditor } from "@/modules/validation/components/ValidationEditor";
 import { WebhookEditor } from "@/modules/webhook/components/WebhookEditor";
 import { FormField, TextInput } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
+import { tryParseJson } from "@shared/json/tryParseJson";
 
 export function RouteEditor({
   value,
@@ -26,15 +28,16 @@ export function RouteEditor({
   const [rawMode, setRawMode] = useState(false);
   const [raw, setRaw] = useState(() => JSON.stringify(value, null, 2));
   const [rawError, setRawError] = useState("");
-  const patch = (next: Partial<GatewayRoute>) => onChange({ ...value, ...next });
+  const patch = (next: Partial<GatewayRoute>) => onChange(omitUndefined({ ...value, ...next }));
 
   const toggleRaw = () => {
     if (rawMode) {
-      try {
-        onChange(JSON.parse(raw) as GatewayRoute);
+      const parsed = tryParseJson(raw);
+      if (parsed.success) {
+        onChange(parsed.value as GatewayRoute);
         setRawError("");
         setRawMode(false);
-      } catch {
+      } else {
         setRawError("The JSON is not valid yet.");
       }
     } else {

@@ -1,4 +1,5 @@
 import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 import type { JsonObject, RouteSource } from "./RouteSource";
 
 export class EnvRouteSource implements RouteSource {
@@ -9,7 +10,7 @@ export class EnvRouteSource implements RouteSource {
     try {
       return JSON.parse(raw) as JsonObject[];
     } catch (error) {
-      logger.error({ err: error }, "Failed to parse ROUTES env var as JSON, skipping");
+      logger.error({ err: toError(error) }, "Failed to parse ROUTES env var as JSON, skipping");
       return [];
     }
   }

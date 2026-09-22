@@ -3,6 +3,7 @@ import type { RetryBackoff } from "../../types/retry";
 import { ExponentialBackoff } from "./ExponentialBackoff";
 import { ExponentialJitterBackoff } from "./ExponentialJitterBackoff";
 import { FixedBackoff } from "./FixedBackoff";
+import { assertNever } from "../../../../shared/assertions/assertNever";
 
 /**
  * Translates a `RetryBackoff` configuration value into the corresponding
@@ -12,11 +13,13 @@ import { FixedBackoff } from "./FixedBackoff";
  */
 export class BackoffStrategyFactory {
   static fromConfig(backoff: RetryBackoff | undefined): BackoffStrategy {
-    switch (backoff) {
+    const strategy = backoff ?? "fixed";
+
+    switch (strategy) {
       case "exponential":        return new ExponentialBackoff();
       case "exponential-jitter": return new ExponentialJitterBackoff();
-      case "fixed":
-      default:                   return new FixedBackoff();
+      case "fixed":              return new FixedBackoff();
+      default:                   return assertNever(strategy, "retry backoff strategy");
     }
   }
 }

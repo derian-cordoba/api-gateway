@@ -1,6 +1,8 @@
 import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { withErrorContext } from "@shared/errors/withErrorContext";
+import { isErrorWithCode } from "@shared/errors/isErrorWithCode";
 import { ConfigurationConflictError } from "../errors/ConfigurationConflictError";
 import { createConfigurationRevision } from "./ConfigurationRevision";
 import { validateConfiguration } from "./configuration-validation";
@@ -25,10 +27,12 @@ export class LocalJsonRouteConfigStore implements RouteConfigStore {
         stat(this.filePath).then((details) => details.mtime.toISOString()),
       ]);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (!isErrorWithCode(error, "ENOENT")) throw error;
     }
 
-    const decoded: unknown = JSON.parse(content);
+    const decoded = await withErrorContext(() => JSON.parse(content) as unknown, {
+      message: `Could not parse route configuration at ${this.filePath}`,
+    });
     const validation = validateConfiguration(decoded);
     if (!validation.success) {
       throw new Error(

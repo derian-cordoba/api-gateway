@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
+import { isRecord } from "@shared/guards/isRecord";
 
 type ToolDefinition = {
   name: string;
@@ -84,12 +85,11 @@ export function useRouteTools(
 }
 
 function isCreateRouteInput(input: unknown): input is { baseURL: string; target: string } {
-  if (typeof input !== "object" || input === null) return false;
-  const candidate = input as Record<string, unknown>;
-  if (typeof candidate.baseURL !== "string" || !candidate.baseURL.startsWith("/")) return false;
-  if (typeof candidate.target !== "string") return false;
+  if (!isRecord(input)) return false;
+  if (typeof input.baseURL !== "string" || !input.baseURL.startsWith("/")) return false;
+  if (typeof input.target !== "string") return false;
   try {
-    const url = new URL(candidate.target);
+    const url = new URL(input.target);
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;

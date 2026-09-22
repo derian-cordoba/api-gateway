@@ -8,6 +8,7 @@ import {
   NumberListInput,
   StringListInput,
 } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["cache"]>;
 
@@ -19,7 +20,7 @@ export function CacheEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { ttl: 30_000 };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="cache"

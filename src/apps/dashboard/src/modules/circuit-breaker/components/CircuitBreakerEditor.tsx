@@ -10,6 +10,7 @@ import {
   Toggle,
 } from "@/modules/shared/components/FormControls";
 import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["circuitBreaker"]>;
 
@@ -21,7 +22,7 @@ export function CircuitBreakerEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { threshold: 5, timeout: 30_000 };
-  const update = (patch: Partial<Config>) => onChange({ ...config, ...patch });
+  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="circuitBreaker"

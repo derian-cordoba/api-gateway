@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { tryParseJson } from "@shared/json/tryParseJson";
 
 export function JsonValueInput({
   value,
@@ -32,10 +33,11 @@ export function JsonValueInput({
             onChange(undefined);
             return;
           }
-          try {
-            onChange(JSON.parse(next) as unknown);
+          const parsed = tryParseJson(next);
+          if (parsed.success) {
+            onChange(parsed.value);
             setError("");
-          } catch {
+          } else {
             setError("Enter valid JSON before saving.");
           }
         }}

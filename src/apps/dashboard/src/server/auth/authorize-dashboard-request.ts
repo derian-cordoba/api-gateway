@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { timingSafeStringEqual } from "@shared/security/timingSafeStringEqual";
 
 export function isDashboardRequestAuthorized(request: NextRequest): boolean {
   const expectedToken = process.env.DASHBOARD_TOKEN;
@@ -6,5 +7,7 @@ export function isDashboardRequestAuthorized(request: NextRequest): boolean {
 
   const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   const headerToken = request.headers.get("x-dashboard-token");
-  return bearer === expectedToken || headerToken === expectedToken;
+  return [bearer, headerToken].some(
+    (token) => token !== undefined && token !== null && timingSafeStringEqual(token, expectedToken),
+  );
 }

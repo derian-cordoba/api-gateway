@@ -5,6 +5,7 @@ import { JwtAuthStrategy } from "./auth/JwtAuthStrategy";
 import { ApiKeyAuthStrategy } from "./auth/ApiKeyAuthStrategy";
 import { BasicAuthStrategy } from "./auth/BasicAuthStrategy";
 import { OAuth2AuthStrategy } from "./auth/OAuth2AuthStrategy";
+import { assertNever } from "../../../shared/assertions/assertNever";
 
 /**
  * Resolves the correct `AuthStrategy` for the given `auth` config using
@@ -21,6 +22,8 @@ function resolveStrategy(auth: Auth): AuthStrategy {
       return new BasicAuthStrategy(auth);
     case "oauth2":
       return new OAuth2AuthStrategy(auth);
+    default:
+      return assertNever(auth, "authentication strategy");
   }
 }
 

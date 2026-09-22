@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import type { RequestKeyExtractor } from "./RequestKeyExtractor";
+import { getHeaderValue } from "../../../../shared/http/getHeaderValue";
 
 /** Extracts the value of a named request header. */
 export class HeaderKeyExtractor implements RequestKeyExtractor {
@@ -10,7 +11,6 @@ export class HeaderKeyExtractor implements RequestKeyExtractor {
   }
 
   extract(req: Request): string | null {
-    const val = req.headers[this.headerName];
-    return (Array.isArray(val) ? val[0] : val) ?? null;
+    return getHeaderValue(req.headers[this.headerName]) ?? null;
   }
 }

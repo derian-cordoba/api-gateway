@@ -1,16 +1,8 @@
-import pino from "pino";
+import { createLogger } from "../../shared/logging/createLogger";
 import { appEnv } from "./config/app-env";
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  ...(appEnv.env.isDev && {
-    transport: {
-      target: "pino-pretty",
-      options: {
-        colorize: true,
-        ignore: "pid,hostname",
-        translateTime: "SYS:HH:MM:ss",
-      },
-    },
-  }),
+export const logger = createLogger({
+  service: "api-gateway",
+  level: process.env.LOG_LEVEL,
+  pretty: appEnv.env.isDev,
 });

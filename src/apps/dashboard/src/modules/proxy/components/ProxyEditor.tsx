@@ -11,6 +11,7 @@ import {
   TextInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
+import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type ProxyConfig = GatewayRoute["proxy"];
 
@@ -24,7 +25,7 @@ export function ProxyEditor({
   onChange: (value: ProxyConfig) => void;
 }) {
   const loadBalanced = value.targets !== undefined;
-  const update = (patch: Partial<ProxyConfig>) => onChange({ ...value, ...patch });
+  const update = (patch: Partial<ProxyConfig>) => onChange(omitUndefined({ ...value, ...patch }));
 
   return (
     <FeatureSection
@@ -39,13 +40,15 @@ export function ProxyEditor({
           type="button"
           className={!loadBalanced ? "active" : ""}
           onClick={() =>
-            onChange({
-              ...value,
-              targets: undefined,
-              strategy: undefined,
-              stickyKey: undefined,
-              target: value.target ?? "http://localhost:4000",
-            })
+            onChange(
+              omitUndefined({
+                ...value,
+                targets: undefined,
+                strategy: undefined,
+                stickyKey: undefined,
+                target: value.target ?? "http://localhost:4000",
+              }),
+            )
           }
         >
           Single target
@@ -54,15 +57,17 @@ export function ProxyEditor({
           type="button"
           className={loadBalanced ? "active" : ""}
           onClick={() =>
-            onChange({
-              ...value,
-              target: undefined,
-              targets: value.targets ?? [
-                { url: "http://localhost:4001" },
-                { url: "http://localhost:4002" },
-              ],
-              strategy: value.strategy ?? "round-robin",
-            })
+            onChange(
+              omitUndefined({
+                ...value,
+                target: undefined,
+                targets: value.targets ?? [
+                  { url: "http://localhost:4001" },
+                  { url: "http://localhost:4002" },
+                ],
+                strategy: value.strategy ?? "round-robin",
+              }),
+            )
           }
         >
           Load balanced

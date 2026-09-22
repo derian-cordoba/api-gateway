@@ -5,6 +5,7 @@ import type { Gateway } from "../../types/gateway";
 import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { RequestKeyExtractorFactory } from "../../middleware/key-extractors/RequestKeyExtractorFactory";
 import { IpKeyExtractor } from "../../middleware/key-extractors/IpKeyExtractor";
+import { omitUndefined } from "../../../../shared/objects/omitUndefined";
 
 const DEFAULT_EXTRACTOR = new IpKeyExtractor();
 
@@ -24,9 +25,14 @@ export class RateLimitMiddlewareFactory implements MiddlewareFactory {
       message: config.message ?? "Too many requests",
       standardHeaders: true,
       legacyHeaders: false,
-      ...(config.skip !== undefined ? { skip: config.skip } : {}),
-      keyGenerator: (req) => extractor.extract(req) ?? ipKeyGenerator(req.ip ?? "unknown") ?? "unknown",
-      ...(config.store !== undefined ? { store: config.store as Store } : {}),
+      ...omitUndefined({
+        skip: config.skip,
+        store: config.store as Store | undefined,
+      }),
+      keyGenerator: (req) =>
+        extractor.extract(req) ??
+        ipKeyGenerator(req.ip ?? "unknown") ??
+        "unknown",
     });
   }
 }

@@ -1,5 +1,6 @@
 import { createPublicKey, type JsonWebKey as NodeJsonWebKey } from "node:crypto";
 import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 
 type JsonWebKey = {
   readonly kid?: string;
@@ -75,7 +76,7 @@ export class JwksKeyStore {
         const pem = keyObject.export({ type: "spki", format: "pem" }) as string;
         this.keysByKid.set(jwk.kid, pem);
       } catch (err) {
-        logger.warn({ jwksUri: this.jwksUri, kid: jwk.kid, err }, "Failed to import JWKS key");
+        logger.warn({ jwksUri: this.jwksUri, kid: jwk.kid, err: toError(err) }, "Failed to import JWKS key");
       }
     }
 

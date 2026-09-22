@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -52,5 +52,14 @@ describe("LocalJsonRouteConfigStore", () => {
         initial.revision,
       ),
     ).rejects.toBeInstanceOf(ConfigurationConflictError);
+  });
+
+  it("adds the configuration file path when stored JSON is malformed", async () => {
+    await writeFile(filePath, "{invalid", "utf8");
+
+    await expect(new LocalJsonRouteConfigStore(filePath).read()).rejects.toMatchObject({
+      message: `Could not parse route configuration at ${filePath}`,
+      cause: expect.any(SyntaxError),
+    });
   });
 });
