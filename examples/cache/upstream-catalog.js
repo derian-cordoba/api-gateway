@@ -1,3 +1,4 @@
+const { readBody, json: sendJson, delay, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Product Catalog Service
  *
@@ -16,10 +17,6 @@
  *   POST /           create product    (NOT cached — POST is not idempotent)
  */
 
-const http = require("http");
-
-// ── State ──────────────────────────────────────────────────────────────────
-
 let requestCount = 0;
 
 const products = [
@@ -29,37 +26,13 @@ const products = [
   { id: 4, name: "USB-C Hub",            price: 34.99,  category: "electronics", inStock: true  },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
 function json(res, status, data) {
-  requestCount++;
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "X-Request-Count": String(requestCount),
-  });
-  res.end(JSON.stringify(data, null, 2));
+  sendJson(res, status, data, { "X-Request-Count": String(++requestCount) });
 }
 
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(new Error("Invalid JSON")); }
-    });
-  });
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ── Server ─────────────────────────────────────────────────────────────────
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method } = req;
-  const parts = req.url.split("?")[0].split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   try {
     // GET / — list all products (simulated 200 ms latency)

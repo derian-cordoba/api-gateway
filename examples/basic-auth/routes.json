@@ -1,0 +1,25 @@
+[
+  {
+    "baseURL": "/basic-auth",
+    "proxy": {
+      "target": "http://localhost:4070",
+      "pathRewrite": {
+        "^/basic-auth": ""
+      }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "basicAuth",
+      "credentials": [
+        {
+          "username": "alice",
+          "password": "password123"
+        }
+      ],
+      "authRateLimit": {
+        "max": 5,
+        "windowMs": 60000
+      }
+    }
+  }
+]

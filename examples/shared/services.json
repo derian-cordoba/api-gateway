@@ -1,0 +1,217 @@
+{
+  "basic": [
+    {
+      "file": "basic/upstream-users.js",
+      "ports": {
+        "USERS_PORT": 4001
+      }
+    },
+    {
+      "file": "basic/upstream-products.js",
+      "ports": {
+        "PRODUCTS_PORT": 4002
+      }
+    }
+  ],
+  "jwt-auth": [
+    {
+      "file": "jwt-auth/auth-service.js",
+      "ports": {
+        "AUTH_PORT": 4003
+      }
+    },
+    {
+      "file": "jwt-auth/upstream-orders.js",
+      "ports": {
+        "ORDERS_PORT": 4004
+      }
+    }
+  ],
+  "api-key-auth": [
+    {
+      "file": "api-key-auth/upstream-reports.js",
+      "ports": {
+        "REPORTS_PORT": 4005
+      }
+    }
+  ],
+  "circuit-breaker": [
+    {
+      "file": "circuit-breaker/upstream-payments.js",
+      "ports": {
+        "PAYMENTS_PORT": 4006,
+        "PAYMENTS_ADMIN_PORT": 4066
+      }
+    }
+  ],
+  "request-id": [
+    {
+      "file": "request-id/upstream-inventory.js",
+      "ports": {
+        "INVENTORY_PORT": 4007
+      }
+    }
+  ],
+  "ip-filter": [
+    {
+      "file": "ip-filter/upstream-analytics.js",
+      "ports": {
+        "ANALYTICS_PORT": 4008
+      }
+    }
+  ],
+  "load-balancer": [
+    {
+      "file": "load-balancer/upstream-catalog.js",
+      "ports": {
+        "CATALOG_PORT": 4010
+      },
+      "env": {
+        "CATALOG_INSTANCE": "A"
+      }
+    },
+    {
+      "file": "load-balancer/upstream-catalog.js",
+      "ports": {
+        "CATALOG_PORT": 4011
+      },
+      "env": {
+        "CATALOG_INSTANCE": "B"
+      }
+    },
+    {
+      "file": "load-balancer/upstream-catalog.js",
+      "ports": {
+        "CATALOG_PORT": 4012
+      },
+      "env": {
+        "CATALOG_INSTANCE": "C"
+      }
+    }
+  ],
+  "websocket": [
+    {
+      "file": "websocket/upstream-chat.js",
+      "ports": {
+        "CHAT_PORT": 4020
+      }
+    }
+  ],
+  "retry": [
+    {
+      "file": "retry/upstream-inventory.js",
+      "ports": {
+        "INVENTORY_PORT": 4010,
+        "INVENTORY_ADMIN_PORT": 4011
+      },
+      "allPorts": {
+        "INVENTORY_PORT": 4040,
+        "INVENTORY_ADMIN_PORT": 4041
+      }
+    }
+  ],
+  "cache": [
+    {
+      "file": "cache/upstream-catalog.js",
+      "ports": {
+        "CATALOG_PORT": 4020
+      },
+      "allPorts": {
+        "CATALOG_PORT": 4050
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "file": "metrics/upstream-orders.js",
+      "ports": {
+        "ORDERS_PORT": 4030,
+        "ORDERS_ADMIN_PORT": 4031
+      }
+    }
+  ],
+  "header-transform": [
+    {
+      "file": "header-transform/upstream-echo.js",
+      "ports": {
+        "ECHO_PORT": 4060
+      }
+    }
+  ],
+  "route-cors": [
+    {
+      "file": "route-cors/upstream-api.js",
+      "ports": {
+        "API_PORT": 4061
+      }
+    }
+  ],
+  "oauth2": [
+    {
+      "file": "oauth2/auth-server.js",
+      "ports": {
+        "AUTH_PORT": 4062
+      }
+    },
+    {
+      "file": "oauth2/upstream-protected.js",
+      "ports": {
+        "API_PORT": 4063
+      }
+    }
+  ],
+  "basic-auth": [
+    {
+      "file": "basic-auth/upstream-protected.js",
+      "ports": {
+        "BASIC_AUTH_PORT": 4070
+      }
+    }
+  ],
+  "validation": [
+    {
+      "file": "validation/upstream-contacts.js",
+      "ports": {
+        "CONTACTS_PORT": 4071
+      }
+    }
+  ],
+  "webhook": [
+    {
+      "file": "webhook/upstream-events.js",
+      "ports": {
+        "EVENTS_PORT": 4072
+      }
+    }
+  ],
+  "timeout": [
+    {
+      "file": "timeout/upstream-slow.js",
+      "ports": {
+        "SLOW_PORT": 4073
+      }
+    }
+  ],
+  "upstream-signing": [
+    {
+      "file": "upstream-signing/upstream-signed.js",
+      "ports": {
+        "SIGNED_PORT": 4074
+      }
+    }
+  ],
+  "traffic-mirroring": [
+    {
+      "file": "traffic-mirroring/upstream-primary.js",
+      "ports": {
+        "PRIMARY_PORT": 4075
+      }
+    },
+    {
+      "file": "traffic-mirroring/upstream-shadow.js",
+      "ports": {
+        "SHADOW_PORT": 4076
+      }
+    }
+  ]
+}

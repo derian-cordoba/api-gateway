@@ -1,0 +1,21 @@
+[
+  {
+    "baseURL": "/validated",
+    "proxy": {
+      "target": "http://localhost:4071",
+      "pathRewrite": {
+        "^/validated": ""
+      }
+    },
+    "validation": {
+      "requiredFields": [
+        "name",
+        "email"
+      ],
+      "allowedContentTypes": [
+        "application/json"
+      ],
+      "maxBodyBytes": 1024
+    }
+  }
+]

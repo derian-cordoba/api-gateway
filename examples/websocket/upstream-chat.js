@@ -1,3 +1,4 @@
+const { createServer } = require("../shared/http");
 /**
  * Example upstream: Chat Service
  *
@@ -27,18 +28,13 @@
  *     -H "Sec-WebSocket-Version: 13"
  */
 
-const http   = require("http");
 const crypto = require("crypto");
 
 const PORT = Number(process.env.CHAT_PORT || 4020);
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-// ── Active connections ─────────────────────────────────────────────────────
-
 /** @type {Set<import("net").Socket>} */
 const clients = new Set();
-
-// ── WebSocket frame helpers ────────────────────────────────────────────────
 
 /**
  * Build an unmasked server→client text frame.
@@ -121,8 +117,6 @@ function parseFrame(buf) {
   return { opcode: buf[0] & 0x0f, payload, consumed: frameEnd };
 }
 
-// ── Broadcast ──────────────────────────────────────────────────────────────
-
 function broadcast(text) {
   const frame = buildTextFrame(text);
   for (const socket of clients) {
@@ -130,9 +124,7 @@ function broadcast(text) {
   }
 }
 
-// ── HTTP server (handles both plain HTTP and WebSocket upgrades) ───────────
-
-const server = http.createServer((_req, res) => {
+const server = createServer((_req, res) => {
   // Plain HTTP requests return a simple status page
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ service: "chat", clients: clients.size, port: PORT }));

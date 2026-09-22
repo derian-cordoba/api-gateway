@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+"use strict";
+
+const { createServer, json } = require("../shared/http");
 /**
  * OAuth 2.0 example — protected upstream API.
  *
@@ -7,14 +10,10 @@
  *
  * Port: process.env.API_PORT (default 4063)
  */
-"use strict";
-
-const http = require("node:http");
 
 const PORT = parseInt(process.env.API_PORT ?? "4063", 10);
 
-const server = http.createServer((req, res) => {
-  res.setHeader("Content-Type", "application/json");
+const server = createServer((req, res) => {
 
   const body = {
     message: "Welcome to the protected API",
@@ -24,7 +23,7 @@ const server = http.createServer((req, res) => {
     timestamp: new Date().toISOString(),
   };
 
-  res.end(JSON.stringify(body, null, 2));
+  json(res, 200, body);
   console.log(`[protected-api] ${req.method} ${req.url}`);
 });
 

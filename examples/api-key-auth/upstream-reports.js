@@ -1,3 +1,4 @@
+const { json, createServer } = require("../shared/http");
 /**
  * Example upstream: Reports Service
  * Runs on http://localhost:4005
@@ -12,7 +13,6 @@
  *   GET /users     — user acquisition stats
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const summary = {
@@ -40,12 +40,7 @@ const users = [
   { month: "2025-06", newUsers: 312, churned: 17, retention: "95%" },
 ];
 
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-const server = http.createServer((req, res) => {
+const server = createServer((req, res) => {
   const { method, url } = req;
 
   if (method !== "GET") {

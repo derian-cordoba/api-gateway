@@ -1,0 +1,16 @@
+[
+  {
+    "baseURL": "/mirrored",
+    "retry": { "attempts": 1, "delay": 0 },
+    "proxy": {
+      "target": "http://localhost:4075",
+      "pathRewrite": {
+        "^/mirrored": ""
+      },
+      "mirror": {
+        "target": "http://localhost:4076",
+        "percentage": 100
+      }
+    }
+  }
+]

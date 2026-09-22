@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Analytics Service
  *
@@ -14,10 +15,7 @@
  * upstream never sees the blocked requests at all.
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
-
-// ── Seed data ──────────────────────────────────────────────────────────────
 
 const events = [
   { id: 1, event: "page_view",  path: "/home",     userId: 1, ts: "2024-01-15T10:00:00Z" },
@@ -36,31 +34,11 @@ const summary = {
   }, {}),
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(new Error("Invalid JSON body")); }
-    });
-  });
-}
-
-// ── Server ─────────────────────────────────────────────────────────────────
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method } = req;
   // The gateway strips the route prefix via pathRewrite; all paths seen here
   // are relative to the upstream root.
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   console.log(`[analytics-service] ${method} ${req.url}`);
 

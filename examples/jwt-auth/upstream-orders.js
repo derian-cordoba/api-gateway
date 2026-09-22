@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Orders Service
  * Runs on http://localhost:4004
@@ -9,7 +10,6 @@
  * trusts that any request it receives has already been authenticated.
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const orders = [
@@ -18,28 +18,9 @@ const orders = [
   { id: 3, userId: 1, status: "shipped",   total: 14.98, items: [{ productId: 3, qty: 3 }] },
 ];
 
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method } = req;
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   try {
     // GET / — list all orders

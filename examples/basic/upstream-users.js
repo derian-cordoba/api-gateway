@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Users Service
  * Runs on http://localhost:4001
@@ -6,7 +7,6 @@
  * so this service only needs to handle / and /:id.
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const users = [
@@ -15,28 +15,9 @@ const users = [
   { id: 3, name: "Carol White", email: "carol@example.com", role: "user" },
 ];
 
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method } = req;
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   try {
     // GET / — list all users

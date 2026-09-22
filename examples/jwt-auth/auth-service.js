@@ -1,3 +1,4 @@
+const { readBody, json, createServer } = require("../shared/http");
 /**
  * Example auth service — Issues JWT tokens
  * Runs on http://localhost:4003
@@ -11,7 +12,6 @@
 
 require("dotenv").config();
 
-const http = require("http");
 const jwt = require("jsonwebtoken");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
@@ -23,26 +23,7 @@ const USERS = [
 const SECRET = process.env.JWT_SECRET;
 const EXPIRES_IN = "1h";
 
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method, url } = req;
 
   try {

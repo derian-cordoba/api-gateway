@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+"use strict";
+
+const { readBody: parseBody, json, createServer } = require("../shared/http");
 /**
  * OAuth 2.0 example — mock authorization server.
  *
@@ -11,63 +14,29 @@
  *
  * Port: process.env.AUTH_PORT (default 4062)
  */
-"use strict";
-
-const http = require("node:http");
 
 const PORT = parseInt(process.env.AUTH_PORT ?? "4062", 10);
 
-// ── Valid users ───────────────────────────────────────────────────────────────
 const USERS = {
   alice: "password123",
   bob: "password456",
 };
 
-// ── Gateway client credentials (for introspection auth) ───────────────────────
 const GATEWAY_CLIENT_ID = "gateway-client";
 const GATEWAY_CLIENT_SECRET = "gw-s3cr3t";
 
-// ── In-memory token store: token → { sub, issuedAt } ─────────────────────────
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const tokens = new Map();
 
 function generateToken() {
-  return "tok_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return "tok_" + require("node:crypto").randomBytes(32).toString("hex");
 }
 
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString();
-      const ct = req.headers["content-type"] ?? "";
-      try {
-        if (ct.includes("application/x-www-form-urlencoded")) {
-          resolve(Object.fromEntries(new URLSearchParams(raw)));
-        } else {
-          resolve(JSON.parse(raw || "{}"));
-        }
-      } catch {
-        resolve({});
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function json(res, status, body) {
-  res.setHeader("Content-Type", "application/json");
-  res.statusCode = status;
-  res.end(JSON.stringify(body));
-}
-
-// ── POST /login ───────────────────────────────────────────────────────────────
 async function handleLogin(req, res) {
   const body = await parseBody(req);
   const { username, password } = body;
 
-  if (!username || !password || USERS[username] !== password) {
+  if (!username || !password || !Object.hasOwn(USERS, username) || USERS[username] !== password) {
     return json(res, 401, { error: "invalid_credentials" });
   }
 
@@ -82,7 +51,6 @@ async function handleLogin(req, res) {
   });
 }
 
-// ── POST /introspect ──────────────────────────────────────────────────────────
 // Called by the API gateway. Requires HTTP Basic auth with gateway credentials.
 async function handleIntrospect(req, res) {
   // Validate gateway client credentials
@@ -124,8 +92,7 @@ async function handleIntrospect(req, res) {
   });
 }
 
-// ── Server ────────────────────────────────────────────────────────────────────
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   try {
     if (req.method === "POST" && req.url === "/login") {
       await handleLogin(req, res);

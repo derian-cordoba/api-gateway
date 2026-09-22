@@ -1,0 +1,43 @@
+[
+  {
+    "baseURL": "/webhooks/github",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/github": ""
+      }
+    },
+    "webhook": {
+      "provider": "github",
+      "secret": "example-webhook-secret"
+    }
+  },
+  {
+    "baseURL": "/webhooks/stripe",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/stripe": ""
+      }
+    },
+    "webhook": {
+      "provider": "stripe",
+      "secret": "example-webhook-secret"
+    }
+  },
+  {
+    "baseURL": "/webhooks/custom",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/custom": ""
+      }
+    },
+    "webhook": {
+      "provider": "custom",
+      "secret": "example-webhook-secret",
+      "headerName": "x-example-signature",
+      "hashAlgorithm": "sha256"
+    }
+  }
+]

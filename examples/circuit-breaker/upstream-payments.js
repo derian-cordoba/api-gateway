@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Payments Service
  *
@@ -21,10 +22,7 @@
  *   curl -s http://localhost:4066/status | jq
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
-
-// ── State ──────────────────────────────────────────────────────────────────
 
 /** @type {"healthy" | "failing"} */
 let mode = "healthy";
@@ -35,30 +33,7 @@ const payments = [
   { id: 3, userId: 1, amount: 149.00, currency: "USD", status: "failed",    createdAt: "2024-01-17T09:15:00Z" },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try {
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-  });
-}
-
-// ── Main API (proxied by gateway) ──────────────────────────────────────────
-
-const mainServer = http.createServer(async (req, res) => {
+const mainServer = createServer(async (req, res) => {
   if (mode === "failing") {
     console.log(`[payments-service] ⚠  mode=${mode} — returning 500`);
     return json(res, HttpStatus.INTERNAL_SERVER_ERROR, {
@@ -68,7 +43,7 @@ const mainServer = http.createServer(async (req, res) => {
   }
 
   const { method } = req;
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   try {
     // GET / — list all payments
@@ -109,9 +84,7 @@ const mainServer = http.createServer(async (req, res) => {
   }
 });
 
-// ── Admin API (direct access, not proxied) ─────────────────────────────────
-
-const adminServer = http.createServer(async (req, res) => {
+const adminServer = createServer(async (req, res) => {
   // POST /mode — switch service mode
   if (req.method === "POST" && req.url === "/mode") {
     const body = await readBody(req).catch(() => ({}));
@@ -136,8 +109,6 @@ const adminServer = http.createServer(async (req, res) => {
 
   json(res, HttpStatus.NOT_FOUND, { error: "Not found" });
 });
-
-// ── Boot ───────────────────────────────────────────────────────────────────
 
 const MAIN_PORT  = Number(process.env.PAYMENTS_PORT       || 4006);
 const ADMIN_PORT = Number(process.env.PAYMENTS_ADMIN_PORT || 4066);

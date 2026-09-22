@@ -1604,7 +1604,7 @@ src/apps/api-gateway/
 pnpm example
 ```
 
-Copies `examples/.env` to the project root and starts all services. Once running:
+Compiles the gateway and starts all services with shared example settings, without modifying the project `.env`. Once running:
 
 | Endpoint | Feature | Description |
 |---|---|---|
@@ -1763,6 +1763,8 @@ curl -si http://localhost:3000/chat \
 
 Each sub-directory is also a standalone reference:
 
+See [the examples guide](examples/README.md) for the shared launcher, HTTP helpers, walkthroughs, and smoke checks. Use `bash examples/run.sh --list` to list scenarios or `bash examples/run.sh <name>` to start one.
+
 | Directory | Features demonstrated |
 |---|---|
 | `examples/basic/` | Rate limiting — Users + Products services |
@@ -1779,6 +1781,12 @@ Each sub-directory is also a standalone reference:
 | `examples/header-transform/` | Header transformation — Echo server that shows what the upstream actually received; demo of request + response transforms |
 | `examples/route-cors/` | Route-level CORS — Two routes sharing one upstream: global CORS vs per-route restrictive CORS; preflight demo |
 | `examples/oauth2/` | OAuth 2.0 token introspection — Mock auth server with `/login` + `/introspect`; protected upstream API |
+| `examples/basic-auth/` | Basic authentication and authentication failure limiting |
+| `examples/validation/` | Content type, required fields, and request body limits |
+| `examples/webhook/` | GitHub, Stripe, and custom signature verification |
+| `examples/timeout/` | Upstream deadline and 504 responses |
+| `examples/upstream-signing/` | HMAC signing verified by the upstream |
+| `examples/traffic-mirroring/` | Shadow traffic with observable request counts |
 
 ---
 

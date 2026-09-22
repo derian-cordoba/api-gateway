@@ -1,0 +1,12 @@
+[
+  {
+    "baseURL": "/slow",
+    "proxy": {
+      "target": "http://localhost:4073",
+      "pathRewrite": {
+        "^/slow": ""
+      },
+      "timeout": 100
+    }
+  }
+]

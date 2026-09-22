@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Orders Service
  *
@@ -14,10 +15,6 @@
  *     -d '{"mode":"failing"}'
  */
 
-const http = require("http");
-
-// ── State ──────────────────────────────────────────────────────────────────
-
 /** @type {"healthy" | "failing"} */
 let mode = "healthy";
 
@@ -27,34 +24,14 @@ const orders = [
   { id: 3, userId: 1, total: 320.00, status: "delivered", createdAt: "2024-01-12T15:45:00Z" },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(new Error("Invalid JSON")); }
-    });
-  });
-}
-
-// ── Main API ───────────────────────────────────────────────────────────────
-
-const mainServer = http.createServer(async (req, res) => {
+const mainServer = createServer(async (req, res) => {
   if (mode === "failing") {
     console.log(`[orders] mode=failing → 500`);
     return json(res, 500, { error: "Internal Server Error", message: "Orders service is unavailable" });
   }
 
   const { method } = req;
-  const parts = req.url.split("?")[0].split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   try {
     if (method === "GET" && parts.length === 0) {
@@ -86,9 +63,7 @@ const mainServer = http.createServer(async (req, res) => {
   }
 });
 
-// ── Admin API ──────────────────────────────────────────────────────────────
-
-const adminServer = http.createServer(async (req, res) => {
+const adminServer = createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/mode") {
     const body = await readBody(req).catch(() => ({}));
     const allowed = ["healthy", "failing"];
@@ -107,8 +82,6 @@ const adminServer = http.createServer(async (req, res) => {
 
   json(res, 404, { error: "Not found" });
 });
-
-// ── Boot ───────────────────────────────────────────────────────────────────
 
 const MAIN_PORT  = Number(process.env.ORDERS_PORT       || 4030);
 const ADMIN_PORT = Number(process.env.ORDERS_ADMIN_PORT || 4031);

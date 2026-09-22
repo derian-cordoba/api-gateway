@@ -1,3 +1,4 @@
+const { readBody, json: sendJson, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Inventory Service
  *
@@ -12,12 +13,9 @@
  * upstream without any shared infrastructure.
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const REQUEST_ID_HEADER = "x-request-id";
-
-// ── Seed data ──────────────────────────────────────────────────────────────
 
 const items = [
   { id: 1, sku: "WIDGET-001", name: "Standard Widget",  stock: 142, warehouse: "EU-WEST" },
@@ -26,32 +24,14 @@ const items = [
   { id: 4, sku: "GADGET-002", name: "Advanced Gadget",  stock: 0,   warehouse: "US-EAST" },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
 function json(res, status, data, requestId) {
-  const headers = { "Content-Type": "application/json" };
-  if (requestId) headers[REQUEST_ID_HEADER] = requestId;
-  res.writeHead(status, headers);
-  res.end(JSON.stringify(data, null, 2));
+  sendJson(res, status, data, requestId ? { [REQUEST_ID_HEADER]: requestId } : {});
 }
 
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(new Error("Invalid JSON body")); }
-    });
-  });
-}
-
-// ── Server ─────────────────────────────────────────────────────────────────
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const requestId = req.headers[REQUEST_ID_HEADER] ?? "(none)";
   const { method } = req;
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   // Log every incoming request with the correlation ID
   console.log(`[inventory-service] ${method} ${req.url}  request-id=${requestId}`);

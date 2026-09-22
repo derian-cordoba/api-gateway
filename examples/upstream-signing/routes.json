@@ -1,0 +1,16 @@
+[
+  {
+    "baseURL": "/signed",
+    "retry": { "attempts": 1, "delay": 0 },
+    "proxy": {
+      "target": "http://localhost:4074",
+      "pathRewrite": {
+        "^/signed": ""
+      },
+      "upstreamAuth": {
+        "type": "hmac-sha256",
+        "secret": "example-upstream-secret"
+      }
+    }
+  }
+]

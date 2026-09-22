@@ -4,7 +4,9 @@
     "proxy": {
       "target": "http://localhost:4003",
       "changeOrigin": true,
-      "pathRewrite": { "^/auth": "" }
+      "pathRewrite": {
+        "^/auth": ""
+      }
     }
   },
   {
@@ -12,11 +14,14 @@
     "proxy": {
       "target": "http://localhost:4004",
       "changeOrigin": true,
-      "pathRewrite": { "^/orders": "" }
+      "pathRewrite": {
+        "^/orders": ""
+      }
     },
     "auth": {
       "enabled": true,
-      "strategy": "jwt"
+      "strategy": "jwt",
+      "secret": "super-secret-key-change-in-production"
     }
   }
 ]

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+"use strict";
+
+const { createServer, json } = require("../shared/http");
 /**
  * Route-level CORS example — simple JSON API upstream.
  *
@@ -7,15 +10,11 @@
  *
  * Port: process.env.API_PORT (default 4061)
  */
-"use strict";
-
-const http = require("node:http");
 
 const PORT = parseInt(process.env.API_PORT ?? "4061", 10);
 
-const server = http.createServer((req, res) => {
+const server = createServer((req, res) => {
   const route = req.url?.split("?")[0] ?? "/";
-  res.setHeader("Content-Type", "application/json");
 
   const body = {
     message: "Hello from the upstream API",
@@ -24,7 +23,7 @@ const server = http.createServer((req, res) => {
     timestamp: new Date().toISOString(),
   };
 
-  res.end(JSON.stringify(body, null, 2));
+  json(res, 200, body);
   console.log(`[api] ${req.method} ${req.url}`);
 });
 

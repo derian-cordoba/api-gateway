@@ -4,7 +4,9 @@
     "proxy": {
       "target": "http://localhost:4001",
       "changeOrigin": true,
-      "pathRewrite": { "^/users": "" }
+      "pathRewrite": {
+        "^/users": ""
+      }
     },
     "rateLimit": {
       "max": 10,
@@ -18,7 +20,9 @@
     "proxy": {
       "target": "http://localhost:4002",
       "changeOrigin": true,
-      "pathRewrite": { "^/products": "" }
+      "pathRewrite": {
+        "^/products": ""
+      }
     },
     "rateLimit": {
       "max": 20,
@@ -32,7 +36,9 @@
     "proxy": {
       "target": "http://localhost:4003",
       "changeOrigin": true,
-      "pathRewrite": { "^/auth": "" }
+      "pathRewrite": {
+        "^/auth": ""
+      }
     }
   },
   {
@@ -40,11 +46,14 @@
     "proxy": {
       "target": "http://localhost:4004",
       "changeOrigin": true,
-      "pathRewrite": { "^/orders": "" }
+      "pathRewrite": {
+        "^/orders": ""
+      }
     },
     "auth": {
       "enabled": true,
-      "strategy": "jwt"
+      "strategy": "jwt",
+      "secret": "super-secret-key-change-in-production"
     }
   },
   {
@@ -52,13 +61,18 @@
     "proxy": {
       "target": "http://localhost:4005",
       "changeOrigin": true,
-      "pathRewrite": { "^/reports": "" }
+      "pathRewrite": {
+        "^/reports": ""
+      }
     },
     "auth": {
       "enabled": true,
       "strategy": "apiKey",
       "header": "x-api-key",
-      "keys": ["key-service-alpha-123", "key-service-beta-456"]
+      "keys": [
+        "key-service-alpha-123",
+        "key-service-beta-456"
+      ]
     }
   },
   {
@@ -66,7 +80,9 @@
     "proxy": {
       "target": "http://localhost:4006",
       "changeOrigin": true,
-      "pathRewrite": { "^/payments": "" }
+      "pathRewrite": {
+        "^/payments": ""
+      }
     },
     "circuitBreaker": {
       "threshold": 3,
@@ -79,7 +95,9 @@
     "proxy": {
       "target": "http://localhost:4007",
       "changeOrigin": true,
-      "pathRewrite": { "^/inventory": "" }
+      "pathRewrite": {
+        "^/inventory": ""
+      }
     }
   },
   {
@@ -87,7 +105,9 @@
     "proxy": {
       "target": "http://localhost:4008",
       "changeOrigin": true,
-      "pathRewrite": { "^/analytics/public": "" }
+      "pathRewrite": {
+        "^/analytics/public": ""
+      }
     }
   },
   {
@@ -95,23 +115,36 @@
     "proxy": {
       "target": "http://localhost:4008",
       "changeOrigin": true,
-      "pathRewrite": { "^/analytics/internal": "" }
+      "pathRewrite": {
+        "^/analytics/internal": ""
+      }
     },
     "ipFilter": {
-      "allow": ["127.0.0.1"]
+      "allow": [
+        "127.0.0.1"
+      ]
     }
   },
   {
     "baseURL": "/catalog",
     "proxy": {
       "targets": [
-        { "url": "http://localhost:4010" },
-        { "url": "http://localhost:4011", "weight": 2 },
-        { "url": "http://localhost:4012" }
+        {
+          "url": "http://localhost:4010"
+        },
+        {
+          "url": "http://localhost:4011",
+          "weight": 2
+        },
+        {
+          "url": "http://localhost:4012"
+        }
       ],
       "strategy": "round-robin",
       "changeOrigin": true,
-      "pathRewrite": { "^/catalog": "" }
+      "pathRewrite": {
+        "^/catalog": ""
+      }
     }
   },
   {
@@ -119,7 +152,9 @@
     "proxy": {
       "target": "http://localhost:4020",
       "changeOrigin": true,
-      "pathRewrite": { "^/chat": "" },
+      "pathRewrite": {
+        "^/chat": ""
+      },
       "ws": true
     }
   },
@@ -128,7 +163,9 @@
     "proxy": {
       "target": "http://localhost:4040",
       "changeOrigin": true,
-      "pathRewrite": { "^/retry-inventory": "" }
+      "pathRewrite": {
+        "^/retry-inventory": ""
+      }
     },
     "retry": {
       "attempts": 3,
@@ -141,12 +178,19 @@
     "proxy": {
       "target": "http://localhost:4050",
       "changeOrigin": true,
-      "pathRewrite": { "^/cached-catalog": "" }
+      "pathRewrite": {
+        "^/cached-catalog": ""
+      }
     },
     "cache": {
       "ttl": 30000,
-      "methods": ["GET", "HEAD"],
-      "statusCodes": [200]
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "statusCodes": [
+        200
+      ]
     }
   },
   {
@@ -154,11 +198,15 @@
     "proxy": {
       "target": "http://localhost:4030",
       "changeOrigin": true,
-      "pathRewrite": { "^/metrics-orders": "" }
+      "pathRewrite": {
+        "^/metrics-orders": ""
+      }
     },
     "cache": {
       "ttl": 10000,
-      "methods": ["GET"]
+      "methods": [
+        "GET"
+      ]
     }
   },
   {
@@ -166,7 +214,9 @@
     "proxy": {
       "target": "http://localhost:4060",
       "changeOrigin": true,
-      "pathRewrite": { "^/echo": "" }
+      "pathRewrite": {
+        "^/echo": ""
+      }
     },
     "headers": {
       "request": {
@@ -175,14 +225,18 @@
           "X-Api-Version": "2",
           "X-Internal-Token": "secret-internal-value"
         },
-        "remove": ["user-agent"]
+        "remove": [
+          "user-agent"
+        ]
       },
       "response": {
         "set": {
           "X-Frame-Options": "DENY",
           "X-Custom-Upstream": "overridden-by-gateway"
         },
-        "remove": ["Server"]
+        "remove": [
+          "Server"
+        ]
       }
     }
   },
@@ -191,7 +245,9 @@
     "proxy": {
       "target": "http://localhost:4061",
       "changeOrigin": true,
-      "pathRewrite": { "^/public-api": "" }
+      "pathRewrite": {
+        "^/public-api": ""
+      }
     }
   },
   {
@@ -199,12 +255,23 @@
     "proxy": {
       "target": "http://localhost:4061",
       "changeOrigin": true,
-      "pathRewrite": { "^/restricted-api": "" }
+      "pathRewrite": {
+        "^/restricted-api": ""
+      }
     },
     "cors": {
-      "origin": ["http://trusted.example.com", "https://trusted.example.com"],
-      "methods": ["GET", "OPTIONS"],
-      "allowedHeaders": ["Content-Type", "Authorization"],
+      "origin": [
+        "http://trusted.example.com",
+        "https://trusted.example.com"
+      ],
+      "methods": [
+        "GET",
+        "OPTIONS"
+      ],
+      "allowedHeaders": [
+        "Content-Type",
+        "Authorization"
+      ],
       "maxAge": 3600
     }
   },
@@ -213,7 +280,9 @@
     "proxy": {
       "target": "http://localhost:4062",
       "changeOrigin": true,
-      "pathRewrite": { "^/oauth2-auth": "" }
+      "pathRewrite": {
+        "^/oauth2-auth": ""
+      }
     }
   },
   {
@@ -221,11 +290,15 @@
     "proxy": {
       "target": "http://localhost:4063",
       "changeOrigin": true,
-      "pathRewrite": { "^/oauth2-protected": "" }
+      "pathRewrite": {
+        "^/oauth2-protected": ""
+      }
     },
     "headers": {
       "request": {
-        "set": { "X-Forwarded-By": "api-gateway" }
+        "set": {
+          "X-Forwarded-By": "api-gateway"
+        }
       }
     },
     "auth": {
@@ -234,6 +307,127 @@
       "introspectionUrl": "http://localhost:4062/introspect",
       "clientId": "gateway-client",
       "clientSecret": "gw-s3cr3t"
+    }
+  },
+  {
+    "baseURL": "/basic-auth",
+    "proxy": {
+      "target": "http://localhost:4070",
+      "pathRewrite": {
+        "^/basic-auth": ""
+      }
+    },
+    "auth": {
+      "enabled": true,
+      "strategy": "basicAuth",
+      "credentials": [
+        {
+          "username": "alice",
+          "password": "password123"
+        }
+      ],
+      "authRateLimit": {
+        "max": 5,
+        "windowMs": 60000
+      }
+    }
+  },
+  {
+    "baseURL": "/validated",
+    "proxy": {
+      "target": "http://localhost:4071",
+      "pathRewrite": {
+        "^/validated": ""
+      }
+    },
+    "validation": {
+      "requiredFields": [
+        "name",
+        "email"
+      ],
+      "allowedContentTypes": [
+        "application/json"
+      ],
+      "maxBodyBytes": 1024
+    }
+  },
+  {
+    "baseURL": "/webhooks/github",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/github": ""
+      }
+    },
+    "webhook": {
+      "provider": "github",
+      "secret": "example-webhook-secret"
+    }
+  },
+  {
+    "baseURL": "/webhooks/stripe",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/stripe": ""
+      }
+    },
+    "webhook": {
+      "provider": "stripe",
+      "secret": "example-webhook-secret"
+    }
+  },
+  {
+    "baseURL": "/webhooks/custom",
+    "proxy": {
+      "target": "http://localhost:4072",
+      "pathRewrite": {
+        "^/webhooks/custom": ""
+      }
+    },
+    "webhook": {
+      "provider": "custom",
+      "secret": "example-webhook-secret",
+      "headerName": "x-example-signature",
+      "hashAlgorithm": "sha256"
+    }
+  },
+  {
+    "baseURL": "/slow",
+    "proxy": {
+      "target": "http://localhost:4073",
+      "pathRewrite": {
+        "^/slow": ""
+      },
+      "timeout": 100
+    }
+  },
+  {
+    "baseURL": "/signed",
+    "retry": { "attempts": 1, "delay": 0 },
+    "proxy": {
+      "target": "http://localhost:4074",
+      "pathRewrite": {
+        "^/signed": ""
+      },
+      "upstreamAuth": {
+        "type": "hmac-sha256",
+        "secret": "example-upstream-secret"
+      }
+    }
+  },
+  {
+    "baseURL": "/mirrored",
+    "retry": { "attempts": 1, "delay": 0 },
+    "proxy": {
+      "target": "http://localhost:4075",
+      "pathRewrite": {
+        "^/mirrored": ""
+      },
+      "mirror": {
+        "target": "http://localhost:4076",
+        "percentage": 100
+      }
     }
   }
 ]

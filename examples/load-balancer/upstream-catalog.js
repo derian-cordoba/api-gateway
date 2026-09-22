@@ -1,3 +1,4 @@
+const { readBody, json, pathParts, createServer } = require("../shared/http");
 /**
  * Example upstream: Catalog Service (three instances)
  *
@@ -17,13 +18,10 @@
  *   CATALOG_PORT=4012 CATALOG_INSTANCE=C node upstream-catalog.js
  */
 
-const http = require("http");
 const { StatusCodes: HttpStatus } = require("http-status-codes");
 
 const PORT     = Number(process.env.CATALOG_PORT     || 4010);
 const INSTANCE = process.env.CATALOG_INSTANCE        || "A";
-
-// ── Seed data ──────────────────────────────────────────────────────────────
 
 const products = [
   { id: 1, name: "Widget Pro",    category: "hardware", price: 29.99 },
@@ -32,29 +30,9 @@ const products = [
   { id: 4, name: "Service Plus",  category: "software", price: 19.99 },
 ];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function json(res, status, data) {
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(data, null, 2));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => (raw += chunk));
-    req.on("end", () => {
-      try { resolve(raw ? JSON.parse(raw) : {}); }
-      catch { reject(new Error("Invalid JSON body")); }
-    });
-  });
-}
-
-// ── Server ─────────────────────────────────────────────────────────────────
-
-const server = http.createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const { method } = req;
-  const parts = req.url.split("/").filter(Boolean);
+  const parts = pathParts(req);
 
   console.log(`[catalog-${INSTANCE}:${PORT}] ${method} ${req.url}`);
 
