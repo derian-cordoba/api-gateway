@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "../../../../shared/http/httpStatusRange";
 
 export const CacheSchema = z.object({
   ttl: z.number().int().min(1, "ttl must be at least 1ms"),
@@ -8,8 +9,8 @@ export const CacheSchema = z.object({
       z
         .number()
         .int()
-        .min(100, "status code must be between 100 and 599")
-        .max(599, "status code must be between 100 and 599"),
+        .min(MIN_HTTP_STATUS_CODE, "status code must be between 100 and 599")
+        .max(MAX_HTTP_STATUS_CODE, "status code must be between 100 and 599"),
     )
     .optional(),
   staleWhileRevalidateMs: z

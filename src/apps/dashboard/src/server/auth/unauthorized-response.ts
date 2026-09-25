@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 
 export function unauthorizedResponse(): NextResponse {
   return NextResponse.json(
     { error: "Unauthorized", message: "A valid dashboard token is required." },
-    { status: 401, headers: { "Cache-Control": "no-store" } },
+    { status: HttpStatus.UNAUTHORIZED, headers: { "Cache-Control": "no-store" } },
   );
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import { ConfigurationService } from "@/server/configuration/ConfigurationService";
 import { ConfigurationConflictError } from "@/server/errors/ConfigurationConflictError";
 import { isDashboardRequestAuthorized } from "@/server/auth/authorize-dashboard-request";
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch (error) {
     return NextResponse.json(
       { error: "Configuration read failed", message: toMessage(error) },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
+      { status: HttpStatus.INTERNAL_SERVER_ERROR, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
@@ -31,7 +32,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     if (!validation.success) {
       return NextResponse.json(
         { error: "Validation failed", issues: validation.issues },
-        { status: 422, headers: { "Cache-Control": "no-store" } },
+        { status: HttpStatus.UNPROCESSABLE_ENTITY, headers: { "Cache-Control": "no-store" } },
       );
     }
 
@@ -48,13 +49,13 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
           expectedRevision: error.expectedRevision,
           currentRevision: error.currentRevision,
         },
-        { status: 409, headers: { "Cache-Control": "no-store" } },
+        { status: HttpStatus.CONFLICT, headers: { "Cache-Control": "no-store" } },
       );
     }
 
     return NextResponse.json(
       { error: "Configuration save failed", message: toMessage(error) },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
+      { status: HttpStatus.INTERNAL_SERVER_ERROR, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

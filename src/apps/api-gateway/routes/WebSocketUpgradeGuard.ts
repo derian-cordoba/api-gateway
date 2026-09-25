@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { getReasonPhrase, StatusCodes as HttpStatus } from "http-status-codes";
 import { createAuthMiddleware } from "../middleware/authMiddleware";
 import type { Auth } from "../types/auth";
 
@@ -48,7 +49,7 @@ export function createProtectedUpgradeHandler(
 
   function reserveConnection(socket: Duplex, maximum: number | undefined, onClose: () => void): boolean {
     if (maximum !== undefined && activeConnections >= maximum) {
-      rejectUpgrade(socket, 503, "WebSocket connection limit reached");
+      rejectUpgrade(socket, HttpStatus.SERVICE_UNAVAILABLE, "WebSocket connection limit reached");
       return false;
     }
 
@@ -78,7 +79,7 @@ function matchesPath(requestUrl: string, routePath: string): boolean {
 }
 
 function createUpgradeResponse(socket: Duplex): Response {
-  let statusCode = 401;
+  let statusCode = HttpStatus.UNAUTHORIZED;
   const response = {
     status(code: number) {
       statusCode = code;
@@ -106,7 +107,7 @@ function rejectUpgrade(socket: Duplex, statusCode: number, message: string): voi
   if (socket.destroyed) return;
   const payload = message.startsWith("{") ? message : JSON.stringify({ error: message });
   socket.write(
-    `HTTP/1.1 ${statusCode} ${statusCode === 503 ? "Service Unavailable" : "Unauthorized"}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
+    `HTTP/1.1 ${statusCode} ${getReasonPhrase(statusCode)}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(payload)}\r\nConnection: close\r\n\r\n${payload}`,
   );
   socket.destroy();
 }

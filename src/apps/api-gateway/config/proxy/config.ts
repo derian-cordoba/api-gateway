@@ -6,6 +6,7 @@
  */
 
 import { EnvParser } from "../EnvParser";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 
 const {
   METRICS_HISTOGRAM_BUCKETS,
@@ -40,5 +41,9 @@ export const proxyConfig: ProxyConfig = {
   retryBackoffMultiplier:        EnvParser.positiveFloat(RETRY_BACKOFF_MULTIPLIER, 2),
   circuitBreakerSuccessThreshold: EnvParser.positiveInt(CIRCUIT_BREAKER_SUCCESS_THRESHOLD, 1),
   cacheDefaultMethods:           EnvParser.httpMethods(CACHE_DEFAULT_METHODS, ["GET", "HEAD"]),
-  cacheDefaultStatusCodes:       EnvParser.httpStatusCodes(CACHE_DEFAULT_STATUS_CODES, [200, 203, 204]),
+  cacheDefaultStatusCodes:       EnvParser.httpStatusCodes(CACHE_DEFAULT_STATUS_CODES, [
+    HttpStatus.OK,
+    HttpStatus.NON_AUTHORITATIVE_INFORMATION,
+    HttpStatus.NO_CONTENT,
+  ]),
 };

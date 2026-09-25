@@ -1,6 +1,7 @@
 "use client";
 
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_ERROR_STATUS_CODE } from "@shared/http/httpStatusRange";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import { FormField, NumberInput, TextInput } from "@/modules/shared/components/FormControls";
 import { omitUndefined } from "@shared/objects/omitUndefined";
@@ -44,8 +45,8 @@ export function RateLimitEditor({
         </FormField>
         <FormField label="Response status">
           <NumberInput
-            min={400}
-            max={599}
+            min={MIN_HTTP_ERROR_STATUS_CODE}
+            max={MAX_HTTP_STATUS_CODE}
             value={config.statusCode}
             onValue={(statusCode) => update({ statusCode })}
             placeholder="429"

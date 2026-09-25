@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import { ConfigurationService } from "@/server/configuration/ConfigurationService";
 import { ConfigurationConflictError } from "@/server/errors/ConfigurationConflictError";
 import { isDashboardRequestAuthorized } from "@/server/auth/authorize-dashboard-request";
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch (error) {
     return NextResponse.json(
       { error: "Configuration history failed", message: toMessage(error) },
-      { status: 500 },
+      { status: HttpStatus.INTERNAL_SERVER_ERROR },
     );
   }
 }
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as { revision?: unknown; expectedRevision?: unknown };
     if (typeof body.revision !== "string" || !/^[a-f0-9]{16}$/.test(body.revision)) {
-      return NextResponse.json({ error: "Invalid revision" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid revision" }, { status: HttpStatus.BAD_REQUEST });
     }
     const expectedRevision =
       typeof body.expectedRevision === "string" ? body.expectedRevision : undefined;
@@ -36,12 +37,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error instanceof ConfigurationConflictError) {
       return NextResponse.json(
         { error: "Revision conflict", message: error.message },
-        { status: 409 },
+        { status: HttpStatus.CONFLICT },
       );
     }
     return NextResponse.json(
       { error: "Configuration restore failed", message: toMessage(error) },
-      { status: 500 },
+      { status: HttpStatus.INTERNAL_SERVER_ERROR },
     );
   }
 }

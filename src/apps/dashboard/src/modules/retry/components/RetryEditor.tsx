@@ -1,6 +1,8 @@
 "use client";
 
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "@shared/http/httpStatusRange";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import {
   FormField,
@@ -86,7 +88,7 @@ export function RetryEditor({
           onChange={(enabled) =>
             update({
               fallback: enabled
-                ? { status: 502, body: { error: "Upstream unavailable" } }
+                ? { status: HttpStatus.BAD_GATEWAY, body: { error: "Upstream unavailable" } }
                 : undefined,
             })
           }
@@ -96,8 +98,8 @@ export function RetryEditor({
           <div className="form-grid form-grid--top-gap">
             <FormField label="Fallback status">
               <NumberInput
-                min={100}
-                max={599}
+                min={MIN_HTTP_STATUS_CODE}
+                max={MAX_HTTP_STATUS_CODE}
                 value={config.fallback.status}
                 onValue={(status) => update({ fallback: { ...config.fallback!, status } })}
                 placeholder="502"

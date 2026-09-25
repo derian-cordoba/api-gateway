@@ -1,3 +1,5 @@
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "../../../shared/http/httpStatusRange";
+
 /**
  * Stateless helpers for parsing raw environment-variable strings into typed
  * values. Each method falls back to the provided default when the raw input
@@ -82,7 +84,7 @@ export class EnvParser {
     const codes = raw
       .split(",")
       .map((segment) => Number(segment.trim()))
-      .filter((number) => Number.isInteger(number) && number >= 100 && number <= 599);
+      .filter((number) => Number.isInteger(number) && number >= MIN_HTTP_STATUS_CODE && number <= MAX_HTTP_STATUS_CODE);
 
     return codes.length > 0 ? codes : fallback;
   }

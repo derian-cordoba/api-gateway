@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 import { ConfigurationService } from "@/server/configuration/ConfigurationService";
 import { isDashboardRequestAuthorized } from "@/server/auth/authorize-dashboard-request";
 import { unauthorizedResponse } from "@/server/auth/unauthorized-response";
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch (error) {
     return NextResponse.json(
       { status: "error", message: error instanceof Error ? error.message : "Unexpected error" },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
+      { status: HttpStatus.INTERNAL_SERVER_ERROR, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

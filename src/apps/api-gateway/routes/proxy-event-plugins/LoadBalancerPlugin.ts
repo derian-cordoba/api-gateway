@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import type { LoadBalancer } from "../../middleware/load-balancer/LoadBalancer";
 import type { ProxyEventPlugin } from "./ProxyEventPlugin";
+import { StatusCodes as HttpStatus } from "http-status-codes";
 
 /**
  * Decrements the active-connection count on the load balancer when a
@@ -14,7 +15,7 @@ export class LoadBalancerPlugin implements ProxyEventPlugin {
   constructor(private readonly balancer: LoadBalancer) { }
 
   onProxyRes(proxyRes: IncomingMessage, req: IncomingMessage): void {
-    if (proxyRes.statusCode && proxyRes.statusCode >= 500) {
+    if (proxyRes.statusCode && proxyRes.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.balancer.recordFailure(req);
     } else {
       this.balancer.recordSuccess(req);

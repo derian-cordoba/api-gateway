@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "../../../../shared/http/httpStatusRange";
 
 const FallbackSchema = z.object({
-  status: z.number().int().min(100).max(599).optional(),
+  status: z.number().int().min(MIN_HTTP_STATUS_CODE).max(MAX_HTTP_STATUS_CODE).optional(),
   body: z.unknown().optional(),
   headers: z.record(z.string(), z.string()).optional(),
 });

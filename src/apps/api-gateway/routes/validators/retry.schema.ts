@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_ERROR_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "../../../../shared/http/httpStatusRange";
 
 const RetryFallbackSchema = z.object({
-  status: z.number().int().min(100).max(599).optional(),
+  status: z.number().int().min(MIN_HTTP_STATUS_CODE).max(MAX_HTTP_STATUS_CODE).optional(),
   body: z.unknown().optional(),
 });
 
@@ -18,8 +19,8 @@ export const RetrySchema = z.object({
       z
         .number()
         .int()
-        .min(400, "retryOn status codes must be in the 400–599 range")
-        .max(599, "retryOn status codes must be in the 400–599 range"),
+        .min(MIN_HTTP_ERROR_STATUS_CODE, "retryOn status codes must be in the 400–599 range")
+        .max(MAX_HTTP_STATUS_CODE, "retryOn status codes must be in the 400–599 range"),
     )
     .min(1, "retryOn must contain at least one status code")
     .optional(),

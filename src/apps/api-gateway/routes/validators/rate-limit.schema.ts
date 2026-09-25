@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_HTTP_STATUS_CODE, MIN_HTTP_ERROR_STATUS_CODE } from "../../../../shared/http/httpStatusRange";
 
 /**
  * Valid formats for keyBy:
@@ -16,8 +17,8 @@ export const RateLimitSchema = z.object({
   statusCode: z
     .number()
     .int()
-    .min(400, "statusCode must be a 4xx or 5xx HTTP status code")
-    .max(599, "statusCode must be a 4xx or 5xx HTTP status code")
+    .min(MIN_HTTP_ERROR_STATUS_CODE, "statusCode must be a 4xx or 5xx HTTP status code")
+    .max(MAX_HTTP_STATUS_CODE, "statusCode must be a 4xx or 5xx HTTP status code")
     .optional(),
   message: z.string().optional(),
   keyBy: z

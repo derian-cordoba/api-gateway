@@ -87,6 +87,9 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.9.1(@standard-schema/spec@1.1.0)(react-hook-form@7.88.0(react@19.3.0))(zod@4.4.3)
+      http-status-codes:
+        specifier: ^2.3.0
+        version: 2.3.0
       lucide-react:
         specifier: ^0.544.0
         version: 0.544.0(react@19.3.0)
