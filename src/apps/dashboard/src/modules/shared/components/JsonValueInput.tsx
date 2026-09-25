@@ -42,7 +42,7 @@ export function JsonValueInput({
           }
         }}
       />
-      {error ? <span className="field-error">{error}</span> : null}
+      {error && <span className="field-error">{error}</span>}
     </div>
   );
 }

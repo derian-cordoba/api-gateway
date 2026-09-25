@@ -1,49 +1,25 @@
 "use client";
 
-import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import {
   FormField,
   NumberInput,
-  SelectInput,
   StringListInput,
-  TextInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
 import { omitUndefined } from "@shared/objects/omitUndefined";
-
-type Config = NonNullable<GatewayRoute["cors"]>;
-type OriginMode = "single" | "multiple" | "reflect" | "disabled";
+import type { CorsConfig } from "../cors-editor.types";
+import { CorsOriginFields } from "./CorsOriginFields";
 
 export function CorsEditor({
   value,
   onChange,
 }: {
-  value?: Config;
-  onChange: (value?: Config) => void;
+  value?: CorsConfig;
+  onChange: (value?: CorsConfig) => void;
 }) {
   const config = value ?? { origin: "*" };
-  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
-  const mode: OriginMode = Array.isArray(config.origin)
-    ? "multiple"
-    : config.origin === true
-      ? "reflect"
-      : config.origin === false
-        ? "disabled"
-        : "single";
-
-  const changeMode = (next: OriginMode) =>
-    update({
-      origin:
-        next === "multiple"
-          ? ["https://app.example.com"]
-          : next === "reflect"
-            ? true
-            : next === "disabled"
-              ? false
-              : "*",
-    });
-
+  const update = (patch: Partial<CorsConfig>) => onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="cors"
@@ -53,33 +29,7 @@ export function CorsEditor({
       onEnabledChange={(enabled) => onChange(enabled ? config : undefined)}
     >
       <div className="form-grid">
-        <FormField label="Origin mode">
-          <SelectInput
-            value={mode}
-            onChange={(event) => changeMode(event.target.value as OriginMode)}
-          >
-            <option value="single">Single origin</option>
-            <option value="multiple">Origin allowlist</option>
-            <option value="reflect">Reflect request origin</option>
-            <option value="disabled">Disable CORS</option>
-          </SelectInput>
-        </FormField>
-        {mode === "single" ? (
-          <FormField label="Allowed origin">
-            <TextInput
-              value={typeof config.origin === "string" ? config.origin : "*"}
-              onChange={(event) => update({ origin: event.target.value })}
-            />
-          </FormField>
-        ) : null}
-        {mode === "multiple" ? (
-          <FormField label="Allowed origins">
-            <StringListInput
-              value={Array.isArray(config.origin) ? config.origin : []}
-              onChange={(origin) => update({ origin: origin ?? [] })}
-            />
-          </FormField>
-        ) : null}
+        <CorsOriginFields config={config} update={update} />
         <FormField label="Allowed methods">
           <StringListInput
             value={config.methods}
@@ -105,12 +55,12 @@ export function CorsEditor({
           />
         </div>
       </div>
-      {config.credentials && config.origin === "*" ? (
+      {config.credentials && config.origin === "*" && (
         <div className="inline-warning">
           Credentialed CORS cannot use a wildcard origin. Choose an explicit origin or reflect the
           request origin.
         </div>
-      ) : null}
+      )}
     </FeatureSection>
   );
 }

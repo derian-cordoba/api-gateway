@@ -66,6 +66,43 @@ describe("ConfigurationService", () => {
     await expect(Promise.all([first, second])).resolves.toEqual([configuration, configuration]);
   });
 
+  it("shares an initial load across subscribers", async () => {
+    let resolveRequest!: (response: Response) => void;
+    fetchMock.mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    const service = new ConfigurationService();
+    const unsubscribeFirst = service.subscribe(vi.fn());
+    const unsubscribeSecond = service.subscribe(vi.fn());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveRequest(jsonResponse(configuration));
+    await vi.waitFor(() => expect(service.getSnapshot().loading).toBe(false));
+    unsubscribeFirst();
+    unsubscribeSecond();
+  });
+
+  it("shares an in-flight history request", async () => {
+    let resolveRequest!: (response: Response) => void;
+    fetchMock.mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    const service = new ConfigurationService();
+    const first = service.history();
+    const second = service.history();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    resolveRequest(jsonResponse({ entries: [{ revision: "previous", updatedAt: "2026-09-17" }] }));
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      [{ revision: "previous", updatedAt: "2026-09-17" }],
+      [{ revision: "previous", updatedAt: "2026-09-17" }],
+    ]);
+  });
+
   it("saves routes with the current revision and dashboard token", async () => {
     const saved = { ...configuration, revision: "revision-2" };
     fetchMock

@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
 import { RouteCard } from "@/modules/routes/components/RouteCard";
 import { ValidationEditor } from "@/modules/validation/components/ValidationEditor";
+import {
+  KeyValueEditor,
+  NumberListInput,
+  StringListInput,
+} from "@/modules/shared/components/FormControls";
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 
 describe("dashboard React components", () => {
@@ -65,5 +70,44 @@ describe("dashboard React components", () => {
     fireEvent.click(screen.getByRole("switch", { name: "Enable Request validation" }));
 
     expect(onChange).toHaveBeenCalledWith({ allowedContentTypes: ["application/json"] });
+  });
+
+  it("adds a key-value row and keeps it editable until its key is committed", () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<KeyValueEditor onChange={onChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add entry" }));
+    const key = screen.getByRole("textbox", { name: "Header or pattern 1" });
+    const value = screen.getByRole("textbox", { name: "Value 1" });
+    expect(key).toBeInTheDocument();
+    fireEvent.change(key, { target: { value: "X-Trace" } });
+    fireEvent.change(value, { target: { value: "enabled" } });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.blur(value, { relatedTarget: null });
+    expect(onChange).toHaveBeenLastCalledWith({ "X-Trace": "enabled" });
+    rerender(<KeyValueEditor value={{ "X-Trace": "enabled" }} onChange={onChange} />);
+    expect(screen.getByRole("textbox", { name: "Header or pattern 1" })).toHaveValue("X-Trace");
+  });
+
+  it("does not turn an empty number-list segment into zero", () => {
+    const onChange = vi.fn();
+    const { container } = render(<NumberListInput onChange={onChange} />);
+    fireEvent.change(container.querySelector("input")!, { target: { value: "2," } });
+    expect(onChange).toHaveBeenCalledWith([2]);
+    expect(container.querySelector("input")).toHaveValue("2,");
+    fireEvent.change(container.querySelector("input")!, { target: { value: "2,3" } });
+    expect(onChange).toHaveBeenLastCalledWith([2, 3]);
+  });
+
+  it("keeps a trailing newline while editing a string list", () => {
+    const onChange = vi.fn();
+    const { container } = render(<StringListInput onChange={onChange} />);
+    const input = container.querySelector("textarea")!;
+    fireEvent.change(input, { target: { value: "GET\n" } });
+    expect(input).toHaveValue("GET\n");
+    expect(onChange).toHaveBeenLastCalledWith(["GET"]);
+    fireEvent.change(input, { target: { value: "GET\nPOST" } });
+    expect(onChange).toHaveBeenLastCalledWith(["GET", "POST"]);
   });
 });

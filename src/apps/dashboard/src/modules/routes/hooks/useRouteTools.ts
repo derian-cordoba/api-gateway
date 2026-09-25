@@ -26,17 +26,15 @@ export function useRouteTools(
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
 
-    const register = (tool: ToolDefinition) => {
+    const register = async (tool: ToolDefinition) => {
       try {
-        void Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(
-          () => undefined,
-        );
+        await context.registerTool(tool, { signal: lifecycle.signal });
       } catch {
         // WebMCP is progressive enhancement; the dashboard remains fully usable without it.
       }
     };
 
-    register({
+    void register({
       name: "list_gateway_routes",
       title: "List gateway routes",
       description: "Read the active file-backed gateway route summaries shown in this dashboard.",
@@ -53,7 +51,7 @@ export function useRouteTools(
       }),
     });
 
-    register({
+    void register({
       name: "create_gateway_route",
       title: "Create gateway route",
       description: "Create and immediately apply a basic single-upstream gateway route.",

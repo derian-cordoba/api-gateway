@@ -1,28 +1,21 @@
 "use client";
 
-import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
-import {
-  FormField,
-  NumberInput,
-  SelectInput,
-  TextInput,
-  Toggle,
-} from "@/modules/shared/components/FormControls";
+import { FormField, SelectInput, TextInput } from "@/modules/shared/components/FormControls";
 import { omitUndefined } from "@shared/objects/omitUndefined";
-
-type Config = NonNullable<GatewayRoute["webhook"]>;
+import type { WebhookConfig } from "../webhook-editor.types";
+import { WebhookProviderFields } from "./WebhookProviderFields";
 
 export function WebhookEditor({
   value,
   onChange,
 }: {
-  value?: Config;
-  onChange: (value?: Config) => void;
+  value?: WebhookConfig;
+  onChange: (value?: WebhookConfig) => void;
 }) {
   const config = value ?? { provider: "github" as const, secret: "" };
-  const update = (patch: Partial<Config>) => {
-    onChange(omitUndefined({ ...config, ...patch }) as Config);
+  const update = (patch: Partial<WebhookConfig>) => {
+    onChange(omitUndefined({ ...config, ...patch }) as WebhookConfig);
   };
 
   return (
@@ -38,7 +31,7 @@ export function WebhookEditor({
           <SelectInput
             value={config.provider}
             onChange={(event) => {
-              const provider = event.target.value as Config["provider"];
+              const provider = event.target.value as WebhookConfig["provider"];
               update({
                 provider,
                 headerName:
@@ -61,43 +54,7 @@ export function WebhookEditor({
             onChange={(event) => update({ secret: event.target.value })}
           />
         </FormField>
-        {config.provider === "stripe" ? (
-          <>
-            <FormField label="Timestamp tolerance" hint="Seconds; defaults to 300.">
-              <NumberInput
-                min={1}
-                value={config.toleranceSeconds}
-                onValue={(toleranceSeconds) => update({ toleranceSeconds })}
-              />
-            </FormField>
-            <Toggle
-              checked={config.replayProtection ?? false}
-              onChange={(replayProtection) => update({ replayProtection })}
-              label="Reject replayed signatures"
-            />
-          </>
-        ) : null}
-        {config.provider === "custom" ? (
-          <>
-            <FormField label="Signature header">
-              <TextInput
-                value={config.headerName ?? ""}
-                onChange={(event) => update({ headerName: event.target.value || undefined })}
-                placeholder="x-webhook-signature"
-              />
-            </FormField>
-            <FormField
-              label="Hash algorithm"
-              hint="Any HMAC algorithm supported by Node.js crypto."
-            >
-              <TextInput
-                value={config.hashAlgorithm ?? ""}
-                onChange={(event) => update({ hashAlgorithm: event.target.value || undefined })}
-                placeholder="sha256"
-              />
-            </FormField>
-          </>
-        ) : null}
+        <WebhookProviderFields config={config} update={update} />
       </div>
     </FeatureSection>
   );

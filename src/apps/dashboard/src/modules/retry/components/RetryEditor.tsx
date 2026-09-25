@@ -1,8 +1,5 @@
 "use client";
 
-import { StatusCodes as HttpStatus } from "http-status-codes";
-import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
-import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "@shared/http/httpStatusRange";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
 import {
   FormField,
@@ -12,20 +9,19 @@ import {
   StringListInput,
   Toggle,
 } from "@/modules/shared/components/FormControls";
-import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
 import { omitUndefined } from "@shared/objects/omitUndefined";
-
-type Config = NonNullable<GatewayRoute["retry"]>;
+import type { RetryConfig } from "../retry-editor.types";
+import { RetryFallbackFields } from "./RetryFallbackFields";
 
 export function RetryEditor({
   value,
   onChange,
 }: {
-  value?: Config;
-  onChange: (value?: Config) => void;
+  value?: RetryConfig;
+  onChange: (value?: RetryConfig) => void;
 }) {
   const config = value ?? { attempts: 3, delay: 250, backoff: "exponential-jitter" as const };
-  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
+  const update = (patch: Partial<RetryConfig>) => onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="retry"
@@ -53,7 +49,7 @@ export function RetryEditor({
         <FormField label="Backoff">
           <SelectInput
             value={config.backoff ?? "fixed"}
-            onChange={(event) => update({ backoff: event.target.value as Config["backoff"] })}
+            onChange={(event) => update({ backoff: event.target.value as RetryConfig["backoff"] })}
           >
             <option value="fixed">Fixed</option>
             <option value="exponential">Exponential</option>
@@ -82,38 +78,7 @@ export function RetryEditor({
           label="Collapse identical in-flight requests"
         />
       </div>
-      <div className="nested-panel">
-        <Toggle
-          checked={config.fallback !== undefined}
-          onChange={(enabled) =>
-            update({
-              fallback: enabled
-                ? { status: HttpStatus.BAD_GATEWAY, body: { error: "Upstream unavailable" } }
-                : undefined,
-            })
-          }
-          label="Serve a fallback after retries are exhausted"
-        />
-        {config.fallback ? (
-          <div className="form-grid form-grid--top-gap">
-            <FormField label="Fallback status">
-              <NumberInput
-                min={MIN_HTTP_STATUS_CODE}
-                max={MAX_HTTP_STATUS_CODE}
-                value={config.fallback.status}
-                onValue={(status) => update({ fallback: { ...config.fallback!, status } })}
-                placeholder="502"
-              />
-            </FormField>
-            <FormField label="Fallback body" hint="Any valid JSON value." wide>
-              <JsonValueInput
-                value={config.fallback.body}
-                onChange={(body) => update({ fallback: { ...config.fallback!, body } })}
-              />
-            </FormField>
-          </div>
-        ) : null}
-      </div>
+      <RetryFallbackFields config={config} update={update} />
     </FeatureSection>
   );
 }

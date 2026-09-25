@@ -1,30 +1,22 @@
 "use client";
 
-import { StatusCodes as HttpStatus } from "http-status-codes";
-import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
-import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "@shared/http/httpStatusRange";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
-import {
-  FormField,
-  KeyValueEditor,
-  NumberInput,
-  TextInput,
-  Toggle,
-} from "@/modules/shared/components/FormControls";
-import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
+import { FormField, NumberInput } from "@/modules/shared/components/FormControls";
 import { omitUndefined } from "@shared/objects/omitUndefined";
-
-type Config = NonNullable<GatewayRoute["circuitBreaker"]>;
+import type { CircuitBreakerConfig } from "../circuit-breaker-editor.types";
+import { HealthCheckFields } from "./HealthCheckFields";
+import { CircuitFallbackFields } from "./CircuitFallbackFields";
 
 export function CircuitBreakerEditor({
   value,
   onChange,
 }: {
-  value?: Config;
-  onChange: (value?: Config) => void;
+  value?: CircuitBreakerConfig;
+  onChange: (value?: CircuitBreakerConfig) => void;
 }) {
   const config = value ?? { threshold: 5, timeout: 30_000 };
-  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
+  const update = (patch: Partial<CircuitBreakerConfig>) =>
+    onChange(omitUndefined({ ...config, ...patch }));
   return (
     <FeatureSection
       id="circuitBreaker"
@@ -57,90 +49,8 @@ export function CircuitBreakerEditor({
           />
         </FormField>
       </div>
-      <div className="nested-panel">
-        <Toggle
-          checked={config.healthCheck !== undefined}
-          onChange={(enabled) =>
-            update({
-              healthCheck: enabled
-                ? { url: "http://localhost:4000/health", intervalMs: 10_000 }
-                : undefined,
-            })
-          }
-          label="Use active health checks"
-        />
-        {config.healthCheck ? (
-          <div className="form-grid form-grid--top-gap">
-            <FormField label="Health URL" wide>
-              <TextInput
-                type="url"
-                value={config.healthCheck.url}
-                onChange={(event) =>
-                  update({ healthCheck: { ...config.healthCheck!, url: event.target.value } })
-                }
-              />
-            </FormField>
-            <FormField label="Probe interval" hint="Milliseconds">
-              <NumberInput
-                min={1}
-                value={config.healthCheck.intervalMs}
-                onValue={(intervalMs) =>
-                  update({ healthCheck: { ...config.healthCheck!, intervalMs: intervalMs ?? 1 } })
-                }
-              />
-            </FormField>
-            <FormField label="Probe timeout" hint="Milliseconds">
-              <NumberInput
-                min={1}
-                value={config.healthCheck.timeoutMs}
-                onValue={(timeoutMs) =>
-                  update({ healthCheck: { ...config.healthCheck!, timeoutMs } })
-                }
-              />
-            </FormField>
-          </div>
-        ) : null}
-      </div>
-      <div className="nested-panel">
-        <Toggle
-          checked={config.fallback !== undefined}
-          onChange={(enabled) =>
-            update({
-              fallback: enabled
-                ? { status: HttpStatus.SERVICE_UNAVAILABLE, body: { degraded: true } }
-                : undefined,
-            })
-          }
-          label="Serve a fallback response while open"
-        />
-        {config.fallback ? (
-          <div className="form-grid form-grid--top-gap">
-            <FormField label="Fallback status">
-              <NumberInput
-                min={MIN_HTTP_STATUS_CODE}
-                max={MAX_HTTP_STATUS_CODE}
-                value={config.fallback.status}
-                onValue={(status) => update({ fallback: { ...config.fallback!, status } })}
-                placeholder="503"
-              />
-            </FormField>
-            <FormField label="Fallback body" hint="Any valid JSON value." wide>
-              <JsonValueInput
-                value={config.fallback.body}
-                onChange={(body) => update({ fallback: { ...config.fallback!, body } })}
-              />
-            </FormField>
-            <FormField label="Fallback headers" wide>
-              <KeyValueEditor
-                value={config.fallback.headers}
-                onChange={(headers) => update({ fallback: { ...config.fallback!, headers } })}
-                keyPlaceholder="Header name"
-                valuePlaceholder="Header value"
-              />
-            </FormField>
-          </div>
-        ) : null}
-      </div>
+      <HealthCheckFields config={config} update={update} />
+      <CircuitFallbackFields config={config} update={update} />
     </FeatureSection>
   );
 }

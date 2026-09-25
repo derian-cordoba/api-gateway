@@ -31,18 +31,18 @@ export function FeatureSection({
         <div>
           <div className="feature-section__title-row">
             <h2>{title}</h2>
-            {required ? <span className="badge badge--required">Required</span> : null}
+            {required && <span className="badge badge--required">Required</span>}
           </div>
           <p>{description}</p>
         </div>
         <div className="feature-section__actions" onClick={(event) => event.preventDefault()}>
-          {!required && onEnabledChange ? (
+          {!required && onEnabledChange && (
             <Toggle checked={enabled} onChange={onEnabledChange} label={`Enable ${title}`} />
-          ) : null}
+          )}
           <ChevronDown className="feature-section__chevron" size={18} />
         </div>
       </summary>
-      {enabled ? <div className="feature-section__body">{children}</div> : null}
+      {enabled && <div className="feature-section__body">{children}</div>}
     </details>
   );
 }
