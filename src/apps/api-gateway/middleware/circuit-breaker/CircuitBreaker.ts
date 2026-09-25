@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { CircuitBreakerConfig } from "../../types/circuit-breaker";
 import type { Clock } from "./Clock";
-import type { CircuitBreakerStateStore } from "./CircuitBreakerStateStore";
+import type { CircuitBreakerStateStore, CircuitBreakerSnapshot } from "./CircuitBreakerStateStore";
 import type { CircuitBreakerEvents, StateChangePayload } from "./CircuitBreakerEvents";
 import { SystemClock } from "./SystemClock";
 import { InMemoryStateStore } from "./InMemoryStateStore";
@@ -91,6 +91,10 @@ export class CircuitBreaker extends EventEmitter {
     return false; // CLOSED — let the request through
   }
 
+  shouldRejectAsync(): Promise<boolean> {
+    return Promise.resolve(this.shouldReject());
+  }
+
   /**
    * Seconds until the circuit transitions to half-open. Only meaningful in OPEN state.
    */
@@ -116,6 +120,11 @@ export class CircuitBreaker extends EventEmitter {
     this.persist();
   }
 
+  recordSuccessAsync(): Promise<void> {
+    this.recordSuccess();
+    return Promise.resolve();
+  }
+
   recordFailure(): void {
     this.probing = false;
     this.failureCount++;
@@ -134,6 +143,11 @@ export class CircuitBreaker extends EventEmitter {
     }
 
     this.persist();
+  }
+
+  recordFailureAsync(): Promise<void> {
+    this.recordFailure();
+    return Promise.resolve();
   }
 
   // ── Typed EventEmitter overrides ────────────────────────────────────────────
@@ -181,11 +195,23 @@ export class CircuitBreaker extends EventEmitter {
   }
 
   private persist(): void {
-    this.store.save(this.baseURL, {
+    this.store.save(this.baseURL, this.snapshot());
+  }
+
+  protected snapshot(): CircuitBreakerSnapshot {
+    return {
       state: this.state,
       failureCount: this.failureCount,
       successCount: this.successCount,
       nextAttempt: this.nextAttempt,
-    });
+    };
+  }
+
+  protected restoreSnapshot(snapshot: CircuitBreakerSnapshot): void {
+    if (this.state !== snapshot.state) this.probing = false;
+    this.state = snapshot.state;
+    this.failureCount = snapshot.failureCount;
+    this.successCount = snapshot.successCount;
+    this.nextAttempt = snapshot.nextAttempt;
   }
 }

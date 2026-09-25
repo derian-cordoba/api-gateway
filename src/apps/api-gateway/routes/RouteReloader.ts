@@ -10,6 +10,7 @@ import type { Gateway } from "../types/gateway"
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 import { toError } from "../../../shared/errors/toError";
+import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
 
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
@@ -26,6 +27,7 @@ export class RouteReloader {
   constructor(
     private readonly httpServer?: HttpServer,
     private readonly onReloaded?: (routes: readonly Gateway[]) => void,
+    private readonly runtimeOptions: GatewayRuntimeOptions = {},
   ) {
     //
   }
@@ -35,7 +37,9 @@ export class RouteReloader {
    * Must be awaited before the server begins accepting requests.
    */
   async start(): Promise<void> {
-    await this.reload();
+    // The first configuration must load successfully before the gateway can
+    // accept traffic or report itself ready. Later reloads retain last good.
+    await this.reload(true);
     this.attachStableWsHandler();
     this.startWatcher();
     process.on("SIGHUP", this.reloadBound);
@@ -68,11 +72,11 @@ export class RouteReloader {
 
   // ── Private ──────────────────────────────────────────────────────────────
 
-  private async reload(): Promise<void> {
+  private async reload(initial = false): Promise<void> {
     try {
       logger.info("Reloading routes config...");
       const newRouter = ExpressRouter();
-      const { router, wsHandlers, routes, dispose } = await ProxyManager.build(newRouter);
+      const { router, wsHandlers, routes, dispose } = await ProxyManager.build(newRouter, this.runtimeOptions);
       // JS assignment is single-threaded — new requests see the new router immediately
       this.disposeActiveRoutes?.();
       this.innerRouter = router as ExpressRouter;
@@ -82,6 +86,9 @@ export class RouteReloader {
       this.onReloaded?.(routes);
     } catch (err) {
       logger.error({ err: toError(err) }, "Failed to reload routes — keeping current config");
+      if (initial) {
+        throw err;
+      }
     }
   }
 

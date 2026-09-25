@@ -22,13 +22,14 @@ import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requ
 import { createTraceContextMiddleware } from "../middleware/traceContext";
 import { toError } from "../../../shared/errors/toError";
 import { getHeaderValue } from "../../../shared/http/getHeaderValue";
+import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
 
 export class Router {
   private readonly router: ExpressRouter;
   private reloader: RouteReloader | null = null;
   private readonly healthState: HealthState = { ready: false };
 
-  constructor() {
+  constructor(private readonly runtimeOptions: GatewayRuntimeOptions = {}) {
     this.router = ExpressRouter();
   }
 
@@ -79,7 +80,7 @@ export class Router {
     this.router.use(createMetricsRouter(metricsCollector));
 
     // Hot-reloadable proxy routes
-    this.reloader = new RouteReloader(httpServer, onRouteReloaded);
+    this.reloader = new RouteReloader(httpServer, onRouteReloaded, this.runtimeOptions);
     await this.reloader.start();
     this.healthState.ready = true;
     this.router.use(this.reloader.getDelegatorMiddleware());

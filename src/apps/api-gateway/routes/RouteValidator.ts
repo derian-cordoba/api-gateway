@@ -15,20 +15,28 @@ export function validateRoutes(routes: JsonObject[]): Gateway[] {
   }
 
   const validatedRoutes = result.data as Gateway[];
+  const duplicate = findRoutePrefixConflicts(validatedRoutes)
+    .find((conflict) => conflict.exact);
+
+  if (duplicate) {
+    throw new Error(`Duplicate route prefix: ${duplicate.secondPrefix} (routes ${duplicate.firstIndex} and ${duplicate.secondIndex})`);
+  }
   detectPrefixConflicts(validatedRoutes);
   return validatedRoutes;
 }
 
 function detectPrefixConflicts(routes: readonly Gateway[]): void {
   for (const conflict of findRoutePrefixConflicts(routes)) {
-    const [shorterPrefix, longerPrefix] =
-      conflict.firstPrefix.length <= conflict.secondPrefix.length
-        ? [conflict.firstPrefix, conflict.secondPrefix]
-        : [conflict.secondPrefix, conflict.firstPrefix];
+    if (conflict.exact) {
+      continue;
+    }
 
-    logger.warn(
+    const [shorterPrefix, longerPrefix] = conflict.firstPrefix.length <= conflict.secondPrefix.length
+      ? [conflict.firstPrefix, conflict.secondPrefix]
+      : [conflict.secondPrefix, conflict.firstPrefix];
+    logger.info(
       { shorterPrefix, longerPrefix },
-      "Route prefix conflict detected: requests to the longer prefix may be intercepted by the shorter route depending on registration order",
+      "Nested route prefixes: the longer prefix takes precedence",
     );
   }
 }

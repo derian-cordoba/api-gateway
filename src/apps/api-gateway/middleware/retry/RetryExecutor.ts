@@ -1,4 +1,5 @@
 import type { Request } from "express";
+import { createHash } from "node:crypto";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import type { RetryConfig } from "../../types/retry";
 import type { CircuitBreaker } from "../circuit-breaker/CircuitBreaker";
@@ -40,7 +41,7 @@ export class RetryExecutor {
 
   execute(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
     if (this.isCollapsible(req)) {
-      const collapseKey = this.buildCollapseKey(req);
+      const collapseKey = this.buildCollapseKey(req, body);
       return this.inFlightCache.getOrExecute(
         collapseKey,
         (sharedSignal) => this.executeWithRetry(req, body, sharedSignal),
@@ -65,7 +66,7 @@ export class RetryExecutor {
 
         if (this.isRetryable(statusCode) && attempt < this.config.attempts) {
           if (!this.isSafeToRetry(req.method)) {
-            this.breaker?.recordFailure();
+            await this.breaker?.recordFailureAsync();
             this.selector.onFailure?.(req);
             this.selector.onComplete(req);
             logger.warn(
@@ -75,7 +76,7 @@ export class RetryExecutor {
             return upstream;
           }
 
-          this.breaker?.recordFailure();
+          await this.breaker?.recordFailureAsync();
           this.selector.onFailure?.(req);
           lastStatus = statusCode;
           lastErr = undefined;
@@ -87,17 +88,17 @@ export class RetryExecutor {
 
         // Final attempt or successful response — record outcome and return.
         if (statusCode < HttpStatus.INTERNAL_SERVER_ERROR) {
-          this.breaker?.recordSuccess();
+          await this.breaker?.recordSuccessAsync();
           this.selector.onSuccess?.(req);
         } else {
-          this.breaker?.recordFailure();
+          await this.breaker?.recordFailureAsync();
           this.selector.onFailure?.(req);
         }
 
         this.selector.onComplete(req);
         return upstream;
       } catch (err) {
-        this.breaker?.recordFailure();
+        await this.breaker?.recordFailureAsync();
         this.selector.onFailure?.(req);
         lastErr = toError(err);
         lastStatus = 0;
@@ -125,8 +126,18 @@ export class RetryExecutor {
 
   // ── Private helpers ───────────────────────────────────────────────────────
 
-  private buildCollapseKey(req: Request): string {
-    return `${req.method}:${req.url}`;
+  private buildCollapseKey(req: Request, body: Buffer): string {
+    // An upstream may vary its response on any request header. Include the
+    // complete header set (including request IDs) so only equivalent requests
+    // can share one response. Hashing keeps credentials out of map keys.
+    const headers = Object.entries(req.headers)
+      .map(([name, value]) => [name.toLowerCase(), value] as const)
+      .sort(([left], [right]) => left.localeCompare(right));
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify({ headers, ip: req.ip ?? "" }))
+      .update(body)
+      .digest("hex");
+    return `${req.method}:${req.url}:${fingerprint}`;
   }
 
   private isCollapsible(req: Request): boolean {

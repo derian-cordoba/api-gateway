@@ -6,10 +6,15 @@ import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { RequestKeyExtractorFactory } from "../../middleware/key-extractors/RequestKeyExtractorFactory";
 import { IpKeyExtractor } from "../../middleware/key-extractors/IpKeyExtractor";
 import { omitUndefined } from "../../../../shared/objects/omitUndefined";
+import type { RateLimitStore } from "../../middleware/rate-limit/RateLimitStore";
 
 const DEFAULT_EXTRACTOR = new IpKeyExtractor();
 
 export class RateLimitMiddlewareFactory implements MiddlewareFactory {
+  constructor(
+    private readonly storeFactory?: (route: Gateway) => RateLimitStore,
+  ) { }
+
   create(route: Gateway): RequestHandler | null {
     if (!route.rateLimit) return null;
     const config = route.rateLimit;
@@ -27,7 +32,7 @@ export class RateLimitMiddlewareFactory implements MiddlewareFactory {
       legacyHeaders: false,
       ...omitUndefined({
         skip: config.skip,
-        store: config.store as Store | undefined,
+        store: (this.storeFactory?.(route) ?? config.store) as Store | undefined,
       }),
       keyGenerator: (req) =>
         extractor.extract(req) ??

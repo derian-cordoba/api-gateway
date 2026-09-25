@@ -78,6 +78,16 @@ describe("validateRoutes", () => {
       ).toThrow();
     });
 
+    it("rejects duplicate route prefixes", () => {
+      expect(() => validateRoutes([validRoute, { ...validRoute, proxy: { target: "http://localhost:3002" } }]))
+        .toThrow("Duplicate route prefix: /api");
+    });
+
+    it("treats case and trailing slashes as equivalent for duplicate detection", () => {
+      expect(() => validateRoutes([validRoute, { ...validRoute, baseURL: "/API/" }]))
+        .toThrow("Duplicate route prefix: /API/");
+    });
+
     it("throws when proxy.target is not a valid URL", () => {
       expect(() =>
         validateRoutes([{ baseURL: "/api", proxy: { target: "not-a-url" } }])

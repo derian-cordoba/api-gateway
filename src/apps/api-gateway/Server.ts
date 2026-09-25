@@ -4,6 +4,7 @@ import { Router } from "./routes/Router";
 import { GatewayEventBus } from "./middleware/GatewayEventBus";
 import { appEnv } from "./config/app-env";
 import { logger } from "./logger";
+import type { GatewayRuntimeOptions } from "./GatewayRuntimeOptions";
 import { isErrorWithCode } from "../../shared/errors/isErrorWithCode";
 
 export class Server {
@@ -14,10 +15,10 @@ export class Server {
   private readonly prefix: string;
   private readonly eventBus: GatewayEventBus;
 
-  constructor() {
+  constructor(options: GatewayRuntimeOptions = {}) {
     this.port = appEnv.gateway.port;
     this.prefix = appEnv.gateway.prefix;
-    this.router = new Router();
+    this.router = new Router(options);
     this.app = express();
     this.app.set("trust proxy", appEnv.gateway.trustProxy);
     this.httpServer = createServer(this.app);

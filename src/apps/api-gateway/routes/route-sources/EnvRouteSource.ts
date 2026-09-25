@@ -10,8 +10,9 @@ export class EnvRouteSource implements RouteSource {
     try {
       return JSON.parse(raw) as JsonObject[];
     } catch (error) {
-      logger.error({ err: toError(error) }, "Failed to parse ROUTES env var as JSON, skipping");
-      return [];
+      const cause = toError(error);
+      logger.error({ err: cause }, "Failed to parse ROUTES env var as JSON");
+      throw new Error("Could not parse ROUTES env var as JSON", { cause });
     }
   }
 }

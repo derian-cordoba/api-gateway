@@ -17,10 +17,14 @@ function startCountingUpstream(): Promise<{ server: HttpServer; getCount: () => 
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       count++;
-      res.writeHead(200, { "Content-Type": "application/json" });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (req.url?.startsWith("/set-cookie")) headers["Set-Cookie"] = `session=${count}`;
+      if (req.url?.startsWith("/vary")) headers.Vary = "Accept-Language";
+      res.writeHead(200, headers);
       res.end(JSON.stringify({
         count,
         identity: req.headers.authorization ?? req.headers.cookie ?? "public",
+        language: req.headers["accept-language"] ?? "default",
       }));
     });
     server.listen(UPSTREAM_PORT, () => resolve({ server, getCount: () => count }));
@@ -58,6 +62,15 @@ describe("Response caching", () => {
           target: `http://localhost:${UPSTREAM_PORT}`,
           changeOrigin: true,
           pathRewrite: { "^/identity-cache": "" },
+        },
+        cache: { ttl: 5000 },
+      },
+      {
+        baseURL: "/cache-policy",
+        proxy: {
+          target: `http://localhost:${UPSTREAM_PORT}`,
+          changeOrigin: true,
+          pathRewrite: { "^/cache-policy": "" },
         },
         cache: { ttl: 5000 },
       },
@@ -116,5 +129,33 @@ describe("Response caching", () => {
     expect(alice.headers["x-cache"]).toBe("MISS");
     expect(bob.headers["x-cache"]).toBe("MISS");
     expect(aliceAgain.headers["x-cache"]).toBe("HIT");
+  });
+
+  it("does not replay a previous request ID from a cached response", async () => {
+    const first = await request.get("/cache-policy/id").set("X-Request-ID", "first-request");
+    const second = await request.get("/cache-policy/id").set("X-Request-ID", "second-request");
+
+    expect(second.headers["x-cache"]).toBe("HIT");
+    expect(first.headers["x-request-id"]).toBe("first-request");
+    expect(second.headers["x-request-id"]).toBe("second-request");
+  });
+
+  it("does not cache responses that set cookies", async () => {
+    const first = await request.get("/cache-policy/set-cookie");
+    const second = await request.get("/cache-policy/set-cookie");
+
+    expect(first.headers["x-cache"]).toBe("MISS");
+    expect(second.headers["x-cache"]).toBe("MISS");
+    expect(first.headers["set-cookie"]).not.toEqual(second.headers["set-cookie"]);
+  });
+
+  it("does not cache responses with Vary until variant-aware keys are supported", async () => {
+    const english = await request.get("/cache-policy/vary").set("Accept-Language", "en");
+    const french = await request.get("/cache-policy/vary").set("Accept-Language", "fr");
+
+    expect(english.headers["x-cache"]).toBe("MISS");
+    expect(french.headers["x-cache"]).toBe("MISS");
+    expect(english.body.language).toBe("en");
+    expect(french.body.language).toBe("fr");
   });
 });

@@ -15,8 +15,10 @@
 
 export { Server } from "./Server";
 export { CircuitBreaker, CircuitState } from "./middleware/circuit-breaker/CircuitBreaker";
+export { AsyncStateCircuitBreaker } from "./middleware/circuit-breaker/AsyncStateCircuitBreaker";
 export { HealthProber } from "./middleware/circuit-breaker/HealthProber";
 export { ResponseCache } from "./middleware/cache/ResponseCache";
+export { AsyncResponseCache } from "./middleware/cache/AsyncResponseCache";
 export { MemoryCacheStore } from "./middleware/cache/MemoryCacheStore";
 export { LoadBalancer } from "./middleware/load-balancer/LoadBalancer";
 export { HealthAwareSelectionStrategy } from "./middleware/load-balancer/HealthAwareSelectionStrategy";
@@ -45,6 +47,7 @@ export { RedisCircuitBreakerStateStore } from "./middleware/redis/RedisCircuitBr
 // ── Interfaces ─────────────────────────────────────────────────────────────
 
 export type { CacheStore } from "./middleware/cache/CacheStore";
+export type { GatewayRuntimeOptions } from "./GatewayRuntimeOptions";
 export type { SelectionStrategy } from "./middleware/load-balancer/SelectionStrategy";
 export type { TargetSelector } from "./middleware/retry/TargetSelector";
 export type {

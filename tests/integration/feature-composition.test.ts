@@ -170,15 +170,16 @@ describe("Feature composition — integration", () => {
     });
 
     it("caches the upstream response for authenticated requests", async () => {
+      const token = validToken();
       const res1 = await request
         .get("/auth-cache")
-        .set("Authorization", `Bearer ${validToken()}`);
+        .set("Authorization", `Bearer ${token}`);
       expect(res1.status).toBe(200);
       expect(res1.headers["x-cache"]).toBe("MISS");
 
       const res2 = await request
         .get("/auth-cache")
-        .set("Authorization", `Bearer ${validToken()}`);
+        .set("Authorization", `Bearer ${token}`);
       expect(res2.status).toBe(200);
       expect(res2.headers["x-cache"]).toBe("HIT");
     });

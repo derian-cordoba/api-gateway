@@ -20,7 +20,7 @@ export class HealthProber {
   constructor(
     private readonly breaker: CircuitBreaker,
     private readonly config: HealthCheckConfig,
-  ) {}
+  ) { }
 
   /** Start probing. Safe to call multiple times — subsequent calls are no-ops. */
   start(): void {
@@ -53,14 +53,21 @@ export class HealthProber {
 
       if (response.ok) {
         logger.debug({ url: this.config.url }, "Health probe succeeded");
-        this.breaker.recordSuccess();
+        await this.breaker.recordSuccessAsync();
       } else {
         logger.debug({ url: this.config.url, status: response.status }, "Health probe returned non-2xx");
-        this.breaker.recordFailure();
+        await this.breaker.recordFailureAsync();
       }
     } catch (err) {
       logger.debug({ url: this.config.url, err: toError(err) }, "Health probe failed");
-      this.breaker.recordFailure();
+      try {
+        await this.breaker.recordFailureAsync();
+      } catch (stateError) {
+        logger.error(
+          { err: toError(stateError) },
+          "Could not record health probe failure",
+        );
+      }
     }
   }
 }

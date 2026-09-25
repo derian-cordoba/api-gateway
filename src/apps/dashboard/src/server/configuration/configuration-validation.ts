@@ -24,6 +24,20 @@ export function validateConfiguration(input: unknown): ValidationResult {
     };
   }
 
+  const duplicate = findRoutePrefixConflicts(parsed.data).find((conflict) => conflict.exact);
+
+  if (duplicate) {
+    return {
+      success: false,
+      issues: [
+        {
+          path: [duplicate.secondIndex, "baseURL"],
+          message: `Duplicate route prefix: ${duplicate.secondPrefix}`,
+        },
+      ],
+    };
+  }
+
   return {
     success: true,
     routes: parsed.data,
@@ -32,10 +46,10 @@ export function validateConfiguration(input: unknown): ValidationResult {
 }
 
 function findPrefixWarnings(routes: GatewayRoute[]): ConfigurationWarning[] {
-  return findRoutePrefixConflicts(routes).map((conflict) => ({
-    path: [conflict.secondIndex, "baseURL"],
-    message: conflict.exact
-      ? `Duplicate route prefix: ${conflict.secondPrefix}`
-      : `Route prefixes ${conflict.firstPrefix} and ${conflict.secondPrefix} overlap; route order can affect matching.`,
-  }));
+  return findRoutePrefixConflicts(routes)
+    .filter((conflict) => !conflict.exact)
+    .map((conflict) => ({
+      path: [conflict.secondIndex, "baseURL"],
+      message: `Route prefixes ${conflict.firstPrefix} and ${conflict.secondPrefix} overlap; the longer prefix takes precedence.`,
+    }));
 }

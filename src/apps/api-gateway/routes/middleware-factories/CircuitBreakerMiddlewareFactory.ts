@@ -5,6 +5,8 @@ import type { MiddlewareFactory } from "./MiddlewareFactory";
 import { CircuitBreaker } from "../../middleware/circuit-breaker/CircuitBreaker";
 import { HealthProber } from "../../middleware/circuit-breaker/HealthProber";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
+import { AsyncStateCircuitBreaker } from "../../middleware/circuit-breaker/AsyncStateCircuitBreaker";
+import type { AsyncCircuitBreakerStateStore } from "../../middleware/redis/RedisCircuitBreakerStateStore";
 
 /**
  * Creates the circuit-breaker guard middleware for a route and caches the
@@ -19,10 +21,16 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
   private readonly targetBreakers = new Map<string, ReadonlyMap<string, CircuitBreaker>>();
   private readonly probers = new Map<string, HealthProber>();
 
+  constructor(
+    private readonly storeFactory?: (route: Gateway) => AsyncCircuitBreakerStateStore,
+  ) { }
+
   create(route: Gateway): RequestHandler | null {
     if (!route.circuitBreaker) return null;
 
-    const breaker = new CircuitBreaker(route.circuitBreaker, route.baseURL);
+    const breaker = this.storeFactory
+      ? new AsyncStateCircuitBreaker(route.circuitBreaker, route.baseURL, this.storeFactory(route))
+      : new CircuitBreaker(route.circuitBreaker, route.baseURL);
     this.breakers.set(route.baseURL, breaker);
     if (route.proxy.targets) {
       const perTarget = new Map(
@@ -40,8 +48,8 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
       this.probers.set(route.baseURL, prober);
     }
 
-    return (_req: Request, res: Response, next: NextFunction) => {
-      if (!breaker.shouldReject()) return next();
+    return async (_req: Request, res: Response, next: NextFunction) => {
+      if (!await breaker.shouldRejectAsync()) return next();
 
       const retryAfterSeconds = breaker.retryAfterSeconds();
       res.set("Retry-After", String(retryAfterSeconds));

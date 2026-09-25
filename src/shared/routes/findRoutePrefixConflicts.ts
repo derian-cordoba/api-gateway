@@ -19,10 +19,12 @@ export function findRoutePrefixConflicts(
     ) {
       const firstPrefix = routes[firstIndex].baseURL;
       const secondPrefix = routes[secondIndex].baseURL;
-      const exact = firstPrefix === secondPrefix;
+      const firstMatchPath = normalizeMatchPath(firstPrefix);
+      const secondMatchPath = normalizeMatchPath(secondPrefix);
+      const exact = firstMatchPath === secondMatchPath;
       const nested =
-        firstPrefix.startsWith(`${secondPrefix}/`) ||
-        secondPrefix.startsWith(`${firstPrefix}/`);
+        isNested(firstMatchPath, secondMatchPath) ||
+        isNested(secondMatchPath, firstMatchPath);
 
       if (exact || nested) {
         conflicts.push({
@@ -37,4 +39,13 @@ export function findRoutePrefixConflicts(
   }
 
   return conflicts;
+}
+
+function normalizeMatchPath(path: string): string {
+  // Express routers are case-insensitive and ignore trailing slashes by default.
+  return path.replace(/\/+$/, "").toLowerCase() || "/";
+}
+
+function isNested(parent: string, child: string): boolean {
+  return parent === "/" ? child !== "/" : child.startsWith(`${parent}/`);
 }

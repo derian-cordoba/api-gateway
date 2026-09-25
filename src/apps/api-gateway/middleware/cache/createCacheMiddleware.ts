@@ -2,6 +2,9 @@ import type { RequestHandler, Request, Response, NextFunction } from "express";
 import type { OutgoingHttpHeader } from "node:http";
 import type { CacheEntry, ResponseCache } from "./ResponseCache";
 import { createHash } from "node:crypto";
+import type { AsyncResponseCache } from "./AsyncResponseCache";
+import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 
 // ── Concrete types for response method interception ───────────────────────────
 
@@ -45,6 +48,11 @@ const SKIP_HEADERS = new Set([
   "transfer-encoding",
   "connection",
   "keep-alive",
+  "set-cookie",
+  "x-request-id",
+  "x-trace-id",
+  "traceparent",
+  "x-cache",
 ]);
 
 // ── ResponseBodyInterceptor ───────────────────────────────────────────────────
@@ -119,6 +127,16 @@ function cacheIdentity(req: Request): string {
 }
 
 function shouldStoreResponse(res: Response): boolean {
+  // Compression runs again when a cached body is served, so Accept-Encoding
+  // does not need a separate variant. All other Vary headers require keys the
+  // current store cannot represent; bypass those responses for safety.
+  const vary = String(res.getHeader("vary") ?? "")
+    .split(",")
+    .map((header) => header.trim().toLowerCase())
+    .filter(Boolean);
+  if (vary.some((header) => header !== "accept-encoding") || res.getHeader("set-cookie") !== undefined) {
+    return false;
+  }
   const cacheControl = String(res.getHeader("cache-control") ?? "")
     .toLowerCase();
 
@@ -129,7 +147,9 @@ function shouldStoreResponse(res: Response): boolean {
       return normalized === "private"
         || normalized.startsWith("private=")
         || normalized === "no-store"
-        || normalized.startsWith("no-store=");
+        || normalized.startsWith("no-store=")
+        || normalized === "no-cache"
+        || normalized.startsWith("no-cache=");
     });
 }
 
@@ -225,5 +245,77 @@ export function createCacheMiddleware(cache: ResponseCache): RequestHandler {
     });
 
     next();
+  };
+}
+
+/** Async-store variant used when a shared cache backend is supplied. */
+export function createAsyncCacheMiddleware(cache: AsyncResponseCache): RequestHandler {
+  const refreshingKeys = new Set<string>();
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const method = req.method.toUpperCase();
+    const key = `${method}:${req.originalUrl ?? req.url}:identity=${cacheIdentity(req)}`;
+
+    const capture = (): void => {
+      res.setHeader("X-Cache", "MISS");
+      new ResponseBodyInterceptor(res, (body) => {
+        if (cache.isCacheable(method, res.statusCode) && shouldStoreResponse(res)) {
+          void cache.set(key, {
+            status: res.statusCode,
+            headers: extractForwardableHeaders(res),
+            body,
+          }).catch((error: unknown) => logger.error(
+            { err: toError(error) },
+            "Could not store cached response",
+          ));
+        }
+      });
+      next();
+    };
+
+    const handle = async (): Promise<void> => {
+      let result;
+      try {
+        result = await cache.getWithStaleness(key);
+      } catch (error) {
+        logger.error({ err: toError(error) }, "Could not read shared cache");
+        capture();
+        return;
+      }
+
+      if (!result) {
+        capture();
+        return;
+      }
+      if (!result.isStale) {
+        serveCachedResponse(result.entry, res, "HIT");
+        return;
+      }
+
+      if (result.entry.refreshingAt === undefined) {
+        try {
+          await cache.markRefreshing(key);
+        } catch (error) {
+          logger.error(
+            { err: toError(error) },
+            "Could not mark shared cache entry stale",
+          );
+        }
+        serveCachedResponse(result.entry, res, "STALE");
+        return;
+      }
+
+      if (refreshingKeys.has(key)) {
+        serveCachedResponse(result.entry, res, "STALE");
+        return;
+      }
+
+      refreshingKeys.add(key);
+      res.once("finish", () => refreshingKeys.delete(key));
+      res.once("close", () => refreshingKeys.delete(key));
+      capture();
+    };
+
+    void handle().catch(next);
   };
 }

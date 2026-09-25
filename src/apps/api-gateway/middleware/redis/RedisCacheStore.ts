@@ -65,7 +65,16 @@ export class RedisCacheStore<T extends { expiresAt: number }> implements AsyncCa
       return null;
     }
 
-    const parsedEntry = JSON.parse(rawValue) as T;
+    const parsedEntry = JSON.parse(rawValue, (_key, value: unknown) => {
+      if (
+        value !== null && typeof value === "object" &&
+        "type" in value && value.type === "Buffer" &&
+        "data" in value && Array.isArray(value.data)
+      ) {
+        return Buffer.from(value.data as number[]);
+      }
+      return value;
+    }) as T;
 
     if (Date.now() > parsedEntry.expiresAt) {
       await this.client.del(this.prefixedKey(key));

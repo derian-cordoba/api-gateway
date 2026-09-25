@@ -52,6 +52,7 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 ## Features
 
 - **Configuration-driven routing** — define proxy routes in a JSON file, an environment variable, or both; changes take effect on restart with zero code changes
+- **Deterministic nested routing** — longer route prefixes take precedence regardless of configuration order; duplicate prefixes are rejected during validation
 - **Per-route authentication** — protect any route with a JWT Bearer token (HMAC or RSA/EC), an API key, or HTTP Basic Auth; set `enabled: false` to bypass with zero overhead
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
@@ -364,7 +365,7 @@ Automatically retries failed upstream requests (5xx responses or network errors)
 | `retryOn` | `number[]` | — | Explicit list of HTTP status codes that should trigger a retry (e.g. `[500, 502, 503]`). When omitted, all 5xx responses are retried. Each code must be in the 400–599 range. |
 | `retryMethods` | `string[]` | — | Methods eligible for HTTP-status and network-error retries; defaults to `GET`, `HEAD`, and `OPTIONS`. |
 | `fallback` | `{ status?: number; body?: unknown }` | — | Response for thrown proxy/retry errors. Status defaults to 502. Does not replace a final HTTP error response returned by the upstream. |
-| `collapseRequests` | `boolean` | — | Share concurrent `GET`, `HEAD`, or `OPTIONS` work by method and URL. Defaults to false. Each caller keeps an independent cancellation signal. |
+| `collapseRequests` | `boolean` | — | Share concurrent `GET`, `HEAD`, or `OPTIONS` work only when method, URL, and all request headers match. Defaults to false. Each caller keeps an independent cancellation signal. |
 
 #### `Cache`
 
@@ -1352,7 +1353,7 @@ By default, only GET, HEAD, and OPTIONS requests are eligible for HTTP-status an
 
 `fallback` handles thrown proxy/retry errors, such as exhausted network failures. A final HTTP response from the upstream is forwarded, even when its status is retryable; it does not activate this fallback. Circuit-breaker `fallback` is separate and applies when its guard rejects a request.
 
-`collapseRequests` shares one in-flight execution among concurrent GET, HEAD, or OPTIONS requests with the same method and URL. It is not response caching. The key excludes authorization, cookies, headers, and body, so enable it only where those differences cannot change the response, such as a public catalog. Each caller has an independent cancellation signal; cancelling one client does not cancel other subscribers.
+`collapseRequests` shares one in-flight execution among concurrent GET, HEAD, or OPTIONS requests with the same method, URL, and request headers. It is not response caching. Header matching includes credentials, cookies, and gateway-generated request and trace IDs, so normal gateway requests usually do not collapse. Each caller has an independent cancellation signal; cancelling one client does not cancel other subscribers.
 
 ### Response when all attempts fail
 
@@ -1423,7 +1424,7 @@ Cache successful upstream responses in memory per route. Once cached, subsequent
 
 ### Cache key
 
-The cache key is `METHOD:originalURL`. Each route maintains its own independent cache store, so `/catalog` and `/catalog/1` have separate entries even when they share the same route.
+The cache key includes the method, original URL, and a digest of Authorization and Cookie values. Each route maintains its own independent cache store. Responses with `Set-Cookie`, `Cache-Control: private`, `no-store`, or `no-cache` are not stored. Responses with `Vary` on anything other than `Accept-Encoding` are also not stored, because the cache does not support separate header-selected variants. `Accept-Encoding` is safe because cached bodies pass through compression again when served. Request and trace IDs are regenerated for each response rather than replayed from the cache.
 
 ### Response headers
 
@@ -2138,34 +2139,47 @@ To wire it in, extend `authMiddleware.ts` and add a new `strategy` literal to th
 
 ### Pluggable Cache Backend
 
-By default the response cache uses `MemoryCacheStore` (in-process Map). The package also exports `RedisCacheStore` as an asynchronous adapter. Because the built-in `ResponseCache` contract is synchronous, Redis must be connected through an async-aware cache middleware or application-level adapter; it cannot be passed directly to `ResponseCache`.
+By default the response cache uses `MemoryCacheStore` (in-process Map). Pass a `cacheStoreFactory` to `Server` to use an asynchronous shared store. The gateway then uses `AsyncResponseCache` and awaits reads before deciding whether to proxy. Writes are asynchronous; a request that arrives immediately after a miss may also miss until the write completes.
 
 ```ts
-import { RedisCacheStore } from "@derian-cordoba/api-gateway";
-import type { AsyncCacheStore, CacheEntry } from "@derian-cordoba/api-gateway";
+import Redis from "ioredis";
+import {
+  Server, RedisCacheStore, RedisRateLimitStore, RedisCircuitBreakerStateStore,
+} from "@derian-cordoba/api-gateway";
 
-const store: AsyncCacheStore<CacheEntry> = new RedisCacheStore(redisClient);
-const entry = await store.get("route-/api/users");
-await store.set("route-/api/users", entryToStore);
+const redis = new Redis(process.env.REDIS_URL);
+const gateway = new Server({
+  cacheStoreFactory: (route) =>
+    new RedisCacheStore(redis, `gateway:cache:${encodeURIComponent(route.baseURL)}:`),
+  rateLimitStoreFactory: (route) =>
+    new RedisRateLimitStore(
+      redis,
+      route.rateLimit!.windowMs,
+      `gateway:limit:${encodeURIComponent(route.baseURL)}:`,
+    ),
+  circuitBreakerStoreFactory: () =>
+    new RedisCircuitBreakerStateStore(redis, "gateway:circuit:"),
+});
+await gateway.start();
 ```
 
-The built-in route cache remains synchronous and uses `MemoryCacheStore`; wiring Redis into request handling requires an async-aware application adapter.
+The three factories receive validated routes and are only called for routes that enable the corresponding feature. Use the same prefixes and Redis service on every gateway instance. The cache store's Redis serializer restores cached response bodies as Buffers when read back.
 
 ---
 
 ### Distributed Circuit Breaker
 
-The package exports `RedisCircuitBreakerStateStore` as an asynchronous adapter. The built-in `CircuitBreaker` currently uses synchronous state-store methods, so distributed circuit state requires an async-aware breaker integration or a synchronous client adapter.
+With `circuitBreakerStoreFactory`, the gateway checks shared state before each request and writes state transitions after upstream responses. `AsyncStateCircuitBreaker` provides this behavior while the default `CircuitBreaker` remains synchronous and in-process.
 
 ```ts
-import { RedisCircuitBreakerStateStore } from "@derian-cordoba/api-gateway";
-
-const store = new RedisCircuitBreakerStateStore(redisClient);
-const snapshot = await store.load("orders");
-await store.save("orders", nextSnapshot);
+const gateway = new Server({
+  circuitBreakerStoreFactory: () =>
+    new RedisCircuitBreakerStateStore(redisClient, "gateway:circuit:"),
+});
+await gateway.start();
 ```
 
-The built-in `CircuitBreaker` currently uses synchronous state-store methods. Use an async-aware breaker integration or a synchronous client adapter before sharing state across gateway replicas.
+State updates are serialized within each gateway process. The Redis snapshot store uses last-write-wins updates across processes, so simultaneous failures on separate replicas can lose increments; per-target breaker state for load-balanced routes remains local. Use this mode for shared circuit visibility when those limits are acceptable.
 
 ---
 

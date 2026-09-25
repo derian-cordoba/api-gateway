@@ -7,8 +7,8 @@ import type {
 import type { TargetSelector } from "../../../../src/apps/api-gateway/middleware/retry/TargetSelector";
 import type { BackoffStrategy } from "../../../../src/apps/api-gateway/middleware/retry/BackoffStrategy";
 
-function request(method = "GET") {
-  return { method, url: "/resource", headers: {} } as never;
+function request(method = "GET", headers: Record<string, string> = {}) {
+  return { method, url: "/resource", headers } as never;
 }
 
 function selector(): TargetSelector {
@@ -83,5 +83,30 @@ describe("RetryExecutor", () => {
     await expect(first).rejects.toMatchObject({ name: "AbortError" });
     await expect(second).resolves.toMatchObject({ statusCode: 200 });
     expect(client.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not collapse requests with different credentials or representation headers", async () => {
+    const pending: Array<(response: UpstreamResponse) => void> = [];
+    const client: UpstreamHttpClient = {
+      send: vi.fn(() => new Promise<UpstreamResponse>((resolve) => pending.push(resolve))),
+    };
+    const executor = new RetryExecutor(
+      { attempts: 0, delay: 0, collapseRequests: true },
+      client,
+      selector(),
+      null,
+    );
+    const signal = new AbortController().signal;
+    const alice = executor.execute(request("GET", { authorization: "Bearer alice" }), Buffer.alloc(0), signal);
+    const bob = executor.execute(request("GET", { authorization: "Bearer bob" }), Buffer.alloc(0), signal);
+    const french = executor.execute(request("GET", { authorization: "Bearer alice", "accept-language": "fr" }), Buffer.alloc(0), signal);
+
+    expect(client.send).toHaveBeenCalledTimes(3);
+    pending.forEach((resolve, index) => resolve({ statusCode: 200, headers: {}, body: Buffer.from(String(index)) }));
+    await expect(Promise.all([alice, bob, french])).resolves.toMatchObject([
+      { body: Buffer.from("0") },
+      { body: Buffer.from("1") },
+      { body: Buffer.from("2") },
+    ]);
   });
 });

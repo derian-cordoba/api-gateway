@@ -25,6 +25,7 @@ import { PinoRouteRegistrationLogger } from "./RouteRegistrationLogger";
 import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
+import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
 
 export type ProxyOnHandlers = NonNullable<Options["on"]>;
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
@@ -47,7 +48,7 @@ export class ProxyManager {
     private readonly sources: CompositeRouteSource,
     private readonly registrar: RouteRegistrar,
     private readonly circuitBreakerFactory: CircuitBreakerMiddlewareFactory,
-  ) {}
+  ) { }
 
   /**
    * Constructs a fully-wired ProxyManager with the default middleware pipeline.
@@ -66,8 +67,10 @@ export class ProxyManager {
    * 11. Timeout        — abort slow upstream requests
    * 12. Proxy backend  — forward request to upstream
    */
-  static create(router: Router): ProxyManager {
-    const circuitBreakerFactory = new CircuitBreakerMiddlewareFactory();
+  static create(router: Router, runtimeOptions: GatewayRuntimeOptions = {}): ProxyManager {
+    const circuitBreakerFactory = new CircuitBreakerMiddlewareFactory(
+      runtimeOptions.circuitBreakerStoreFactory,
+    );
 
     const middlewareFactories: MiddlewareFactory[] = [
       new CorsMiddlewareFactory(),
@@ -76,10 +79,10 @@ export class ProxyManager {
       new WebhookMiddlewareFactory(),
       new AuthRateLimiterMiddlewareFactory(),
       new AuthMiddlewareFactory(),
-      new RateLimitMiddlewareFactory(),
+      new RateLimitMiddlewareFactory(runtimeOptions.rateLimitStoreFactory),
       circuitBreakerFactory,
       new MetricsMiddlewareFactory(metricsCollector),
-      new CacheMiddlewareFactory(),
+      new CacheMiddlewareFactory(runtimeOptions.cacheStoreFactory),
       new TimeoutMiddlewareFactory(),
     ];
 
@@ -104,8 +107,8 @@ export class ProxyManager {
    * Called on every reload — each invocation is independent with no shared state.
    * Also returns the validated route list so callers can react to route changes.
    */
-  static async build(router: Router): Promise<ProxyBuildResult> {
-    const manager = ProxyManager.create(router);
+  static async build(router: Router, runtimeOptions: GatewayRuntimeOptions = {}): Promise<ProxyBuildResult> {
+    const manager = ProxyManager.create(router, runtimeOptions);
     const { wsHandlers, routes } = await manager.registerProxyRoutes();
     return { router, wsHandlers, routes, dispose: manager.dispose.bind(manager) };
   }
@@ -119,7 +122,10 @@ export class ProxyManager {
       return { wsHandlers: [], routes, dispose: this.dispose.bind(this) };
     }
 
-    const wsHandlers = routes.flatMap((route) => {
+    // Express mounts middleware in registration order. Register longer
+    // prefixes first so a broad route cannot intercept a nested route.
+    const routesBySpecificity = [...routes].sort((left, right) => right.baseURL.length - left.baseURL.length);
+    const wsHandlers = routesBySpecificity.flatMap((route) => {
       const handler = this.registrar.register(route);
       return handler ? [handler] : [];
     });

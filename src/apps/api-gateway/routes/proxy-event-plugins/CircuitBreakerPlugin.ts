@@ -4,6 +4,8 @@ import type { Socket } from "node:net";
 import type { CircuitBreaker } from "../../middleware/circuit-breaker/CircuitBreaker";
 import type { ProxyEventPlugin } from "./ProxyEventPlugin";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
+import { logger } from "../../logger";
+import { toError } from "../../../../shared/errors/toError";
 
 /**
  * Feeds upstream outcomes back into a CircuitBreaker instance:
@@ -12,18 +14,30 @@ import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
  *                when no prior handler has already written a response
  */
 export class CircuitBreakerPlugin implements ProxyEventPlugin {
-  constructor(private readonly breaker: CircuitBreaker) {}
+  constructor(private readonly breaker: CircuitBreaker) { }
 
   onProxyRes(proxyRes: IncomingMessage): void {
     if (proxyRes.statusCode && proxyRes.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.breaker.recordFailure();
+      void this.breaker.recordFailureAsync()
+        .catch((error: unknown) => logger.error(
+          { err: toError(error) },
+          "Could not record circuit failure",
+        ));
     } else {
-      this.breaker.recordSuccess();
+      void this.breaker.recordSuccessAsync()
+        .catch((error: unknown) => logger.error(
+          { err: toError(error) },
+          "Could not record circuit success"),
+        );
     }
   }
 
   onError(_err: Error, _req: IncomingMessage, res: ServerResponse | Socket): void {
-    this.breaker.recordFailure();
+    void this.breaker.recordFailureAsync()
+      .catch((error: unknown) => logger.error(
+        { err: toError(error) },
+        "Could not record circuit failure"),
+      );
 
     if ("headersSent" in res && !res.headersSent) {
       res.writeHead(HttpStatus.BAD_GATEWAY, { "Content-Type": "application/json" });

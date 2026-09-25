@@ -57,6 +57,7 @@ describe("RouteReloader", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockBuild.mockResolvedValue(makeBuildResult());
+    mockWatch.mockClear();
     mockWatch.mockReturnValue(mockWatcherEmitter);
     mockWatcherEmitter.close.mockReset();
     mockWatcherEmitter.removeAllListeners();
@@ -76,6 +77,15 @@ describe("RouteReloader", () => {
 
     expect(mockBuild).toHaveBeenCalledOnce();
     reloader.stop();
+  });
+
+  it("rejects startup when the initial route configuration cannot be built", async () => {
+    mockBuild.mockRejectedValueOnce(new Error("invalid initial routes"));
+    const reloader = new RouteReloader();
+
+    await expect(reloader.start()).rejects.toThrow("invalid initial routes");
+    expect(mockWatch).not.toHaveBeenCalled();
+    expect(process.listenerCount("SIGHUP")).toBe(0);
   });
 
   it("starts watching the routes file", async () => {
