@@ -5,7 +5,6 @@ export type { StateChangePayload };
 
 export type RateLimitExceededPayload = {
   readonly baseURL: string;
-  readonly key: string;
 };
 
 /**

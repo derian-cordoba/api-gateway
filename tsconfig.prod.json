@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "tests", "src/apps/dashboard"],
+  "exclude": ["node_modules", "tests", "src/apps/dashboard", "src/apps/observatory"],
   "compilerOptions": {
     "declaration": true
   }

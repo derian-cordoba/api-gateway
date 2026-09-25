@@ -11,6 +11,7 @@ import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 import { toError } from "../../../shared/errors/toError";
 import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
+import type { GatewayEventBus } from "../middleware/GatewayEventBus";
 
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
@@ -28,6 +29,7 @@ export class RouteReloader {
     private readonly httpServer?: HttpServer,
     private readonly onReloaded?: (routes: readonly Gateway[]) => void,
     private readonly runtimeOptions: GatewayRuntimeOptions = {},
+    private readonly eventBus?: GatewayEventBus,
   ) {
     //
   }
@@ -76,7 +78,7 @@ export class RouteReloader {
     try {
       logger.info("Reloading routes config...");
       const newRouter = ExpressRouter();
-      const { router, wsHandlers, routes, dispose } = await ProxyManager.build(newRouter, this.runtimeOptions);
+      const { router, wsHandlers, routes, dispose } = await ProxyManager.build(newRouter, this.runtimeOptions, this.eventBus);
       // JS assignment is single-threaded — new requests see the new router immediately
       this.disposeActiveRoutes?.();
       this.innerRouter = router as ExpressRouter;

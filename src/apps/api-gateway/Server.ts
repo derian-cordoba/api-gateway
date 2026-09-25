@@ -6,6 +6,7 @@ import { appEnv } from "./config/app-env";
 import { logger } from "./logger";
 import type { GatewayRuntimeOptions } from "./GatewayRuntimeOptions";
 import { isErrorWithCode } from "../../shared/errors/isErrorWithCode";
+import { GatewayOperationState } from "./operations/GatewayOperationState";
 
 export class Server {
   private readonly app: Express;
@@ -14,15 +15,19 @@ export class Server {
   private readonly port: number;
   private readonly prefix: string;
   private readonly eventBus: GatewayEventBus;
+  private readonly operationState: GatewayOperationState;
 
   constructor(options: GatewayRuntimeOptions = {}) {
     this.port = appEnv.gateway.port;
     this.prefix = appEnv.gateway.prefix;
-    this.router = new Router(options);
+    this.eventBus = new GatewayEventBus();
+    this.operationState = new GatewayOperationState();
+    this.eventBus.on("circuitBreaker:stateChange", (payload) => this.operationState.recordCircuitState(payload));
+    this.eventBus.on("rateLimit:exceeded", (payload) => this.operationState.recordRateLimitExceeded(payload));
+    this.router = new Router(options, this.eventBus, this.operationState);
     this.app = express();
     this.app.set("trust proxy", appEnv.gateway.trustProxy);
     this.httpServer = createServer(this.app);
-    this.eventBus = new GatewayEventBus();
   }
 
   /**
@@ -32,7 +37,10 @@ export class Server {
   async init(): Promise<void> {
     await this.router.init(
       this.httpServer,
-      (routes) => this.eventBus.emit("route:reloaded", routes),
+      (routes) => {
+        this.operationState.recordRoutes(routes);
+        this.eventBus.emit("route:reloaded", routes);
+      },
     );
     this.app.use(this.prefix, this.router.getRouter());
   }

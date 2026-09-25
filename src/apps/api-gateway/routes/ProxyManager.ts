@@ -26,6 +26,7 @@ import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { logger } from "../logger";
 import { appEnv } from "../config/app-env";
 import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
+import type { GatewayEventBus } from "../middleware/GatewayEventBus";
 
 export type ProxyOnHandlers = NonNullable<Options["on"]>;
 export type WsUpgradeHandler = (req: IncomingMessage, socket: Duplex, head: Buffer) => void;
@@ -67,9 +68,10 @@ export class ProxyManager {
    * 11. Timeout        — abort slow upstream requests
    * 12. Proxy backend  — forward request to upstream
    */
-  static create(router: Router, runtimeOptions: GatewayRuntimeOptions = {}): ProxyManager {
+  static create(router: Router, runtimeOptions: GatewayRuntimeOptions = {}, eventBus?: GatewayEventBus): ProxyManager {
     const circuitBreakerFactory = new CircuitBreakerMiddlewareFactory(
       runtimeOptions.circuitBreakerStoreFactory,
+      eventBus,
     );
 
     const middlewareFactories: MiddlewareFactory[] = [
@@ -79,7 +81,10 @@ export class ProxyManager {
       new WebhookMiddlewareFactory(),
       new AuthRateLimiterMiddlewareFactory(),
       new AuthMiddlewareFactory(),
-      new RateLimitMiddlewareFactory(runtimeOptions.rateLimitStoreFactory),
+      new RateLimitMiddlewareFactory(
+        runtimeOptions.rateLimitStoreFactory,
+        eventBus,
+      ),
       circuitBreakerFactory,
       new MetricsMiddlewareFactory(metricsCollector),
       new CacheMiddlewareFactory(runtimeOptions.cacheStoreFactory),
@@ -107,8 +112,8 @@ export class ProxyManager {
    * Called on every reload — each invocation is independent with no shared state.
    * Also returns the validated route list so callers can react to route changes.
    */
-  static async build(router: Router, runtimeOptions: GatewayRuntimeOptions = {}): Promise<ProxyBuildResult> {
-    const manager = ProxyManager.create(router, runtimeOptions);
+  static async build(router: Router, runtimeOptions: GatewayRuntimeOptions = {}, eventBus?: GatewayEventBus): Promise<ProxyBuildResult> {
+    const manager = ProxyManager.create(router, runtimeOptions, eventBus);
     const { wsHandlers, routes } = await manager.registerProxyRoutes();
     return { router, wsHandlers, routes, dispose: manager.dispose.bind(manager) };
   }

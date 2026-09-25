@@ -16,3 +16,6 @@ node_modules
 src/apps/dashboard/.next
 src/apps/dashboard/out
 src/apps/dashboard/.env.local
+src/apps/observatory/.next
+src/apps/observatory/out
+src/apps/observatory/.env.local

@@ -1,0 +1,33 @@
+{
+  "name": "@derian-cordoba/api-gateway-observatory",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3002",
+    "build": "next build",
+    "start": "next start --port 3002",
+    "lint": "eslint \"src/**/*.{js,jsx,ts,tsx}\" --max-warnings=0 && prettier --check \"src/**/*.{js,jsx,ts,tsx}\"",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20.9.0",
+    "pnpm": ">=10.0.0"
+  },
+  "dependencies": {
+    "http-status-codes": "^2.3.0",
+    "next": "16.3.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.38.0",
+    "eslint-config-next": "16.3.3",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.7",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.9"
+  }
+}

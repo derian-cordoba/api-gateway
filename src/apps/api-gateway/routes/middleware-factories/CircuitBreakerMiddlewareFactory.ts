@@ -7,6 +7,7 @@ import { HealthProber } from "../../middleware/circuit-breaker/HealthProber";
 import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
 import { AsyncStateCircuitBreaker } from "../../middleware/circuit-breaker/AsyncStateCircuitBreaker";
 import type { AsyncCircuitBreakerStateStore } from "../../middleware/redis/RedisCircuitBreakerStateStore";
+import type { GatewayEventBus } from "../../middleware/GatewayEventBus";
 
 /**
  * Creates the circuit-breaker guard middleware for a route and caches the
@@ -23,6 +24,7 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
 
   constructor(
     private readonly storeFactory?: (route: Gateway) => AsyncCircuitBreakerStateStore,
+    private readonly eventBus?: GatewayEventBus,
   ) { }
 
   create(route: Gateway): RequestHandler | null {
@@ -32,6 +34,7 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
       ? new AsyncStateCircuitBreaker(route.circuitBreaker, route.baseURL, this.storeFactory(route))
       : new CircuitBreaker(route.circuitBreaker, route.baseURL);
     this.breakers.set(route.baseURL, breaker);
+    this.observeBreaker(breaker);
     if (route.proxy.targets) {
       const perTarget = new Map(
         route.proxy.targets.map((target) => [
@@ -40,6 +43,7 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
         ] as const),
       );
       this.targetBreakers.set(route.baseURL, perTarget);
+      for (const targetBreaker of perTarget.values()) this.observeBreaker(targetBreaker);
     }
 
     if (route.circuitBreaker.healthCheck) {
@@ -91,5 +95,9 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
     this.probers.clear();
     this.targetBreakers.clear();
     this.breakers.clear();
+  }
+
+  private observeBreaker(breaker: CircuitBreaker): void {
+    breaker.on("stateChange", (payload) => this.eventBus?.emit("circuitBreaker:stateChange", payload));
   }
 }

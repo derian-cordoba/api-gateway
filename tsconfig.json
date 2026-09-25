@@ -19,5 +19,5 @@
     "strictPropertyInitialization": false
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "src/apps/dashboard"]
+  "exclude": ["node_modules", "src/apps/dashboard", "src/apps/observatory"]
 }

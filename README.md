@@ -147,6 +147,31 @@ pnpm --dir src/apps/dashboard test
 pnpm test:dashboard-api
 ```
 
+## Gateway Observatory
+
+Gateway Observatory is an optional, read-only operational console that runs as
+a separate Next.js application. It reads a protected management API from one
+running gateway and shows route traffic, error totals, average latency, cache
+hits, circuit changes, and rate-limit rejections. See
+[`docs/gateway-observatory-plan.md`](docs/gateway-observatory-plan.md) for the
+design and rollout plan.
+
+To run it locally, enable the management API on the gateway and configure the
+matching URL and token for Observatory:
+
+```bash
+# .env (gateway)
+MANAGEMENT_ENABLED=true
+MANAGEMENT_TOKEN=replace-with-a-long-random-value
+
+# src/apps/observatory/.env.local
+GATEWAY_MANAGEMENT_URL=http://localhost:3000/management
+GATEWAY_MANAGEMENT_TOKEN=replace-with-the-same-value
+
+pnpm dev:gateway
+pnpm dev:observatory
+```
+
 `test:dashboard-api` builds the dashboard, starts it on port `3101` with an isolated temporary copy of the mock route fixture, and exercises every dashboard API with curl. Override the port with `DASHBOARD_TEST_PORT` if needed. The test never reads or writes the project's real `routes.json`.
 
 ---

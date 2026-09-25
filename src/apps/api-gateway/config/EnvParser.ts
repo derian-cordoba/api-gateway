@@ -6,6 +6,14 @@ import { MAX_HTTP_STATUS_CODE, MIN_HTTP_STATUS_CODE } from "../../../shared/http
  * is absent, empty, or cannot be coerced to the expected type/shape.
  */
 export class EnvParser {
+  static boolean(raw: string | undefined, fallback: boolean): boolean {
+    if (!raw) return fallback;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+    return fallback;
+  }
+
   static proxyTrust(raw: string | undefined, fallback: boolean | number): boolean | number {
     if (!raw) {
       return fallback;

@@ -23,13 +23,20 @@ import { createTraceContextMiddleware } from "../middleware/traceContext";
 import { toError } from "../../../shared/errors/toError";
 import { getHeaderValue } from "../../../shared/http/getHeaderValue";
 import type { GatewayRuntimeOptions } from "../GatewayRuntimeOptions";
+import type { GatewayEventBus } from "../middleware/GatewayEventBus";
+import type { GatewayOperationState } from "../operations/GatewayOperationState";
+import { createManagementRouter } from "./ManagementRouter";
 
 export class Router {
   private readonly router: ExpressRouter;
   private reloader: RouteReloader | null = null;
   private readonly healthState: HealthState = { ready: false };
 
-  constructor(private readonly runtimeOptions: GatewayRuntimeOptions = {}) {
+  constructor(
+    private readonly runtimeOptions: GatewayRuntimeOptions = {},
+    private readonly eventBus?: GatewayEventBus,
+    private readonly operationState?: GatewayOperationState,
+  ) {
     this.router = ExpressRouter();
   }
 
@@ -79,10 +86,15 @@ export class Router {
     // Prometheus metrics endpoint
     this.router.use(createMetricsRouter(metricsCollector));
 
+    if (appEnv.management.enabled && this.operationState) {
+      this.router.use(appEnv.management.prefix, createManagementRouter(this.operationState, metricsCollector));
+    }
+
     // Hot-reloadable proxy routes
-    this.reloader = new RouteReloader(httpServer, onRouteReloaded, this.runtimeOptions);
+    this.reloader = new RouteReloader(httpServer, onRouteReloaded, this.runtimeOptions, this.eventBus);
     await this.reloader.start();
     this.healthState.ready = true;
+    this.operationState?.setReady(true);
     this.router.use(this.reloader.getDelegatorMiddleware());
 
     // Error handler must be registered last

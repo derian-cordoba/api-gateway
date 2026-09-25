@@ -7,12 +7,14 @@ import { RequestKeyExtractorFactory } from "../../middleware/key-extractors/Requ
 import { IpKeyExtractor } from "../../middleware/key-extractors/IpKeyExtractor";
 import { omitUndefined } from "../../../../shared/objects/omitUndefined";
 import type { RateLimitStore } from "../../middleware/rate-limit/RateLimitStore";
+import type { GatewayEventBus } from "../../middleware/GatewayEventBus";
 
 const DEFAULT_EXTRACTOR = new IpKeyExtractor();
 
 export class RateLimitMiddlewareFactory implements MiddlewareFactory {
   constructor(
     private readonly storeFactory?: (route: Gateway) => RateLimitStore,
+    private readonly eventBus?: GatewayEventBus,
   ) { }
 
   create(route: Gateway): RequestHandler | null {
@@ -38,6 +40,10 @@ export class RateLimitMiddlewareFactory implements MiddlewareFactory {
         extractor.extract(req) ??
         ipKeyGenerator(req.ip ?? "unknown") ??
         "unknown",
+      handler: (_req, res) => {
+        this.eventBus?.emit("rateLimit:exceeded", { baseURL: route.baseURL });
+        res.status(config.statusCode ?? HttpStatus.TOO_MANY_REQUESTS).send(config.message ?? "Too many requests");
+      },
     });
   }
 }

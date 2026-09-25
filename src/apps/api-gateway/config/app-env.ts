@@ -4,6 +4,7 @@ import { type RoutesConfig, routesConfig } from "./routes/config";
 import { type EnvConfig, envConfig } from "./env/config";
 import { type AuthConfig, authConfig } from "./auth/config";
 import { type ProxyConfig, proxyConfig } from "./proxy/config";
+import { type ManagementConfig, managementConfig } from "./admin/config";
 
 export type AppEnv = {
   env: EnvConfig;
@@ -12,6 +13,7 @@ export type AppEnv = {
   routes: RoutesConfig;
   auth: AuthConfig;
   proxy: ProxyConfig;
+  management: ManagementConfig;
 };
 
 export const appEnv: AppEnv = {
@@ -21,4 +23,5 @@ export const appEnv: AppEnv = {
   routes: routesConfig,
   auth: authConfig,
   proxy: proxyConfig,
+  management: managementConfig,
 } as const satisfies AppEnv;
