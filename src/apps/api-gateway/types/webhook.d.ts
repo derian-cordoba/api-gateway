@@ -25,6 +25,10 @@ export declare type StripeWebhookConfig = {
   headerName?: string;
   /** Ignored because Stripe requires HMAC-SHA256. */
   hashAlgorithm?: string;
+  /** Maximum age of the signed timestamp in seconds. Defaults to 300. */
+  toleranceSeconds?: number;
+  /** Reject the same timestamp/signature pair more than once in this process. */
+  replayProtection?: boolean;
 };
 
 export declare type CustomWebhookConfig = {

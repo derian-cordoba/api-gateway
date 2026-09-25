@@ -62,4 +62,22 @@ describe("LocalJsonRouteConfigStore", () => {
       cause: expect.any(SyntaxError),
     });
   });
+
+  it("keeps revisions and can restore a previous configuration", async () => {
+    const store = new LocalJsonRouteConfigStore(filePath);
+    const initial = await store.read();
+    const first = await store.write(
+      [{ baseURL: "/first", proxy: { target: "http://localhost:4100" } }],
+      initial.revision,
+    );
+    const second = await store.write(
+      [{ baseURL: "/second", proxy: { target: "http://localhost:4200" } }],
+      first.revision,
+    );
+
+    const history = await store.listHistory();
+    expect(history.map((entry) => entry.revision)).toContain(first.revision);
+    const restored = await store.restore(first.revision, second.revision);
+    expect(restored.routes[0].baseURL).toBe("/first");
+  });
 });

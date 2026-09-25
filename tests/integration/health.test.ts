@@ -44,4 +44,15 @@ describe("GET /health", () => {
     const res = await request.get("/health");
     expect(res.headers["access-control-allow-origin"]).toBe("*");
   });
+
+  it("exposes liveness and readiness endpoints", async () => {
+    const [live, ready] = await Promise.all([
+      request.get("/health/live"),
+      request.get("/health/ready"),
+    ]);
+    expect(live.status).toBe(200);
+    expect(live.body.status).toBe("ok");
+    expect(ready.status).toBe(200);
+    expect(ready.body.status).toBe("ready");
+  });
 });

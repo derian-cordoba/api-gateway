@@ -4,6 +4,7 @@ import type { MiddlewareFactory } from "./middleware-factories/MiddlewareFactory
 import type { ProxyBackendFactory } from "./proxy-backends/ProxyBackendFactory";
 import type { RouteRegistrationLogger } from "./RouteRegistrationLogger";
 import type { WsUpgradeHandler } from "./ProxyManager";
+import { createProtectedUpgradeHandler } from "./WebSocketUpgradeGuard";
 
 /**
  * Mounts a single route onto an Express router by running the route config
@@ -23,7 +24,8 @@ export class RouteRegistrar {
     private readonly middlewarePipeline: MiddlewareFactory[],
     private readonly backendFactory: ProxyBackendFactory,
     private readonly registrationLogger: RouteRegistrationLogger,
-  ) {}
+    private readonly gatewayPrefix = "/",
+  ) { }
 
   register(route: Gateway): WsUpgradeHandler | null {
     for (const factory of this.middlewarePipeline) {
@@ -38,6 +40,23 @@ export class RouteRegistrar {
     this.registrationLogger.logRegistration(route);
     if (wsHandler) this.registrationLogger.logWebSocketHandler(route);
 
-    return wsHandler;
+    return wsHandler
+      ? createProtectedUpgradeHandler(
+        route.baseURL,
+        this.gatewayPrefix,
+        route.auth,
+        wsHandler,
+        {
+          maxConnections: route.proxy.maxConnections,
+          idleTimeoutMs: route.proxy.idleTimeoutMs,
+        },
+      )
+      : null;
+  }
+
+  dispose(): void {
+    for (const factory of this.middlewarePipeline) {
+      factory.dispose?.();
+    }
   }
 }

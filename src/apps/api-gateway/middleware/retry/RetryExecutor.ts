@@ -36,13 +36,15 @@ export class RetryExecutor {
     private readonly breaker: CircuitBreaker | null,
     private readonly backoffStrategy: BackoffStrategy = new FixedBackoff(),
     private readonly inFlightCache: InFlightRequestCache = new InFlightRequestCache(),
-  ) {}
+  ) { }
 
   execute(req: Request, body: Buffer, signal: AbortSignal): Promise<UpstreamResponse> {
     if (this.isCollapsible(req)) {
       const collapseKey = this.buildCollapseKey(req);
-      return this.inFlightCache.getOrExecute(collapseKey, () =>
-        this.executeWithRetry(req, body, signal),
+      return this.inFlightCache.getOrExecute(
+        collapseKey,
+        (sharedSignal) => this.executeWithRetry(req, body, sharedSignal),
+        signal,
       );
     }
     return this.executeWithRetry(req, body, signal);
@@ -58,12 +60,13 @@ export class RetryExecutor {
       const target = this.selector.select(req);
 
       try {
-        const upstream = await this.client.send({ target, req, body });
+        const upstream = await this.client.send({ target, req, body, signal });
         const { statusCode } = upstream;
 
         if (this.isRetryable(statusCode) && attempt < this.config.attempts) {
           if (!this.isSafeToRetry(req.method)) {
             this.breaker?.recordFailure();
+            this.selector.onFailure?.(req);
             this.selector.onComplete(req);
             logger.warn(
               { baseURL: req.baseUrl, method: req.method, attempt, status: statusCode },
@@ -73,6 +76,7 @@ export class RetryExecutor {
           }
 
           this.breaker?.recordFailure();
+          this.selector.onFailure?.(req);
           lastStatus = statusCode;
           lastErr = undefined;
           logger.warn({ baseURL: req.baseUrl, attempt, status: statusCode }, "Upstream returned 5xx — retrying");
@@ -84,16 +88,23 @@ export class RetryExecutor {
         // Final attempt or successful response — record outcome and return.
         if (statusCode < HttpStatus.INTERNAL_SERVER_ERROR) {
           this.breaker?.recordSuccess();
+          this.selector.onSuccess?.(req);
         } else {
           this.breaker?.recordFailure();
+          this.selector.onFailure?.(req);
         }
 
         this.selector.onComplete(req);
         return upstream;
       } catch (err) {
         this.breaker?.recordFailure();
+        this.selector.onFailure?.(req);
         lastErr = toError(err);
         lastStatus = 0;
+
+        if (!this.isSafeToRetry(req.method)) {
+          break;
+        }
 
         if (attempt < this.config.attempts && !signal.aborted) {
           logger.warn(
@@ -134,7 +145,9 @@ export class RetryExecutor {
 
   private isSafeToRetry(method: string): boolean {
     if (this.config.retryMethods !== undefined) {
-      return this.config.retryMethods.includes(method);
+      return this.config.retryMethods
+        .map((value) => value.toUpperCase())
+        .includes(method.toUpperCase());
     }
     return ["GET", "HEAD", "OPTIONS"].includes(method);
   }

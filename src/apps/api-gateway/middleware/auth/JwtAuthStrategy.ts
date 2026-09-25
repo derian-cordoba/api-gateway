@@ -34,7 +34,13 @@ export class JwtAuthStrategy implements AuthStrategy {
       return;
     }
 
-    const resolved = await this.resolveKey(token);
+    let resolved: ResolvedKey | null;
+    try {
+      resolved = await this.resolveKey(token);
+    } catch {
+      res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("JWT key could not be resolved"));
+      return;
+    }
     if (!resolved) {
       res.status(HttpStatus.UNAUTHORIZED).json(ErrorResponseFactory.unauthorized("JWT key not configured"));
       return;

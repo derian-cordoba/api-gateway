@@ -7,10 +7,13 @@ import type { MiddlewareFactory } from "./MiddlewareFactory";
 import type { CacheEntry } from "../../middleware/cache/ResponseCache";
 
 export class CacheMiddlewareFactory implements MiddlewareFactory {
+  private readonly stores = new Set<MemoryCacheStore<CacheEntry>>();
+
   create(route: Gateway): RequestHandler | null {
     if (!route.cache) return null;
 
     const store = new MemoryCacheStore<CacheEntry>(route.cache.evictionIntervalMs);
+    this.stores.add(store);
 
     const cache = new ResponseCache({
       ...route.cache,
@@ -19,5 +22,12 @@ export class CacheMiddlewareFactory implements MiddlewareFactory {
     });
 
     return createCacheMiddleware(cache);
+  }
+
+  dispose(): void {
+    for (const store of this.stores) {
+      store.dispose();
+    }
+    this.stores.clear();
   }
 }

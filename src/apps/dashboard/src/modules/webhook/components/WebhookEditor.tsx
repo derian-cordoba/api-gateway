@@ -2,7 +2,13 @@
 
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
 import { FeatureSection } from "@/modules/shared/components/FeatureSection";
-import { FormField, SelectInput, TextInput } from "@/modules/shared/components/FormControls";
+import {
+  FormField,
+  NumberInput,
+  SelectInput,
+  TextInput,
+  Toggle,
+} from "@/modules/shared/components/FormControls";
 import { omitUndefined } from "@shared/objects/omitUndefined";
 
 type Config = NonNullable<GatewayRoute["webhook"]>;
@@ -15,7 +21,9 @@ export function WebhookEditor({
   onChange: (value?: Config) => void;
 }) {
   const config = value ?? { provider: "github" as const, secret: "" };
-  const update = (patch: Partial<Config>) => onChange(omitUndefined({ ...config, ...patch }));
+  const update = (patch: Partial<Config>) => {
+    onChange(omitUndefined({ ...config, ...patch }) as Config);
+  };
 
   return (
     <FeatureSection
@@ -53,6 +61,22 @@ export function WebhookEditor({
             onChange={(event) => update({ secret: event.target.value })}
           />
         </FormField>
+        {config.provider === "stripe" ? (
+          <>
+            <FormField label="Timestamp tolerance" hint="Seconds; defaults to 300.">
+              <NumberInput
+                min={1}
+                value={config.toleranceSeconds}
+                onValue={(toleranceSeconds) => update({ toleranceSeconds })}
+              />
+            </FormField>
+            <Toggle
+              checked={config.replayProtection ?? false}
+              onChange={(replayProtection) => update({ replayProtection })}
+              label="Reject replayed signatures"
+            />
+          </>
+        ) : null}
         {config.provider === "custom" ? (
           <>
             <FormField label="Signature header">

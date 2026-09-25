@@ -16,6 +16,8 @@ export type DashboardStatus = {
   message?: string;
 };
 
+export type ConfigurationHistoryEntry = { revision: string; updatedAt: string };
+
 export type ConfigurationState = {
   configuration: StoredConfiguration | null;
   loading: boolean;
@@ -154,6 +156,24 @@ export class ConfigurationService {
         error: normalizeError(caught, "Could not export configuration."),
       });
     }
+  };
+
+  readonly history = async (): Promise<ConfigurationHistoryEntry[]> => {
+    const payload = await this.request<{ entries: ConfigurationHistoryEntry[] }>(
+      "/api/config/history",
+    );
+    return payload.entries;
+  };
+
+  readonly restore = async (revision: string): Promise<StoredConfiguration | null> => {
+    const current = this.configurationState.configuration;
+    if (!current) return null;
+    const restored = await this.request<StoredConfiguration>("/api/config/history", {
+      method: "POST",
+      body: JSON.stringify({ revision, expectedRevision: current.revision }),
+    });
+    this.setConfigurationState({ configuration: restored });
+    return restored;
   };
 
   readonly getDashboardToken = (): string => {

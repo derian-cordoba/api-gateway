@@ -200,10 +200,30 @@ export function ProxyEditor({
         />
         <Toggle
           checked={value.ws ?? false}
-          onChange={(ws) => update({ ws })}
+          onChange={(ws) =>
+            update({ ws, ...(ws ? {} : { maxConnections: undefined, idleTimeoutMs: undefined }) })
+          }
           label="Proxy WebSockets"
         />
       </div>
+      {value.ws ? (
+        <div className="form-grid">
+          <FormField label="Maximum WebSocket connections" hint="Optional per-route cap.">
+            <NumberInput
+              min={1}
+              value={value.maxConnections}
+              onValue={(maxConnections) => update({ maxConnections })}
+            />
+          </FormField>
+          <FormField label="WebSocket idle timeout" hint="Optional milliseconds.">
+            <NumberInput
+              min={1}
+              value={value.idleTimeoutMs}
+              onValue={(idleTimeoutMs) => update({ idleTimeoutMs })}
+            />
+          </FormField>
+        </div>
+      ) : null}
       <div className="subsection-grid">
         <div className="nested-panel nested-panel--flush">
           <Toggle

@@ -98,12 +98,13 @@ async function main() {
     assert.ok(mirrored > 0);
 
     for (const provider of ["github", "stripe", "custom"]) {
+      const timestamp = Math.floor(Date.now() / 1000);
       const digest = createHmac("sha256", "example-webhook-secret")
-        .update(provider === "stripe" ? `1700000000.${post.body}` : post.body)
+        .update(provider === "stripe" ? `${timestamp}.${post.body}` : post.body)
         .digest("hex");
 
       const header = provider === "github" ? "x-hub-signature-256" : provider === "stripe" ? "stripe-signature" : "x-example-signature";
-      const signature = provider === "github" ? `sha256=${digest}` : provider === "stripe" ? `t=1700000000,v1=${digest}` : digest;
+      const signature = provider === "github" ? `sha256=${digest}` : provider === "stripe" ? `t=${timestamp},v1=${digest}` : digest;
 
       await request(`/webhooks/${provider}`, 200, {
         ...post, 

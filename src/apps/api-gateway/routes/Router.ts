@@ -13,18 +13,20 @@ import compress from "compression";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { RouteReloader } from "./RouteReloader";
-import { createHealthRouter } from "./HealthRouter";
+import { createHealthRouter, type HealthState } from "./HealthRouter";
 import { createMetricsRouter } from "./MetricsRouter";
 import { metricsCollector } from "../middleware/metrics/MetricsCollector";
 import { appEnv } from "../config/app-env";
 import { logger } from "../logger";
 import { createRequestIdMiddleware, REQUEST_ID_HEADER } from "../middleware/requestId";
+import { createTraceContextMiddleware } from "../middleware/traceContext";
 import { toError } from "../../../shared/errors/toError";
 import { getHeaderValue } from "../../../shared/http/getHeaderValue";
 
 export class Router {
   private readonly router: ExpressRouter;
   private reloader: RouteReloader | null = null;
+  private readonly healthState: HealthState = { ready: false };
 
   constructor() {
     this.router = ExpressRouter();
@@ -51,6 +53,7 @@ export class Router {
   ): Promise<void> {
     // Inject / forward X-Request-ID before logging so every log line carries it
     this.router.use(createRequestIdMiddleware());
+    this.router.use(createTraceContextMiddleware());
 
     // Structured HTTP request logging — reuse the request ID set above
     this.router.use(
@@ -70,7 +73,7 @@ export class Router {
     this.configureBodyParser();
 
     // Health check
-    this.router.use(createHealthRouter());
+    this.router.use(createHealthRouter(this.healthState));
 
     // Prometheus metrics endpoint
     this.router.use(createMetricsRouter(metricsCollector));
@@ -78,6 +81,7 @@ export class Router {
     // Hot-reloadable proxy routes
     this.reloader = new RouteReloader(httpServer, onRouteReloaded);
     await this.reloader.start();
+    this.healthState.ready = true;
     this.router.use(this.reloader.getDelegatorMiddleware());
 
     // Error handler must be registered last

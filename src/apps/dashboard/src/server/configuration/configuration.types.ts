@@ -16,7 +16,14 @@ export type StoredRouteConfig = {
   warnings: ConfigurationWarning[];
 };
 
+export type ConfigurationHistoryEntry = {
+  revision: string;
+  updatedAt: string;
+};
+
 export interface RouteConfigStore {
   read(): Promise<StoredRouteConfig>;
   write(routes: GatewayRoute[], expectedRevision?: string): Promise<StoredRouteConfig>;
+  listHistory?(): Promise<ConfigurationHistoryEntry[]>;
+  restore?(revision: string, expectedRevision?: string): Promise<StoredRouteConfig>;
 }

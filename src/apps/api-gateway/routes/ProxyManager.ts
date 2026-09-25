@@ -33,17 +33,20 @@ export type ProxyBuildResult = {
   router: Router;
   wsHandlers: WsUpgradeHandler[];
   routes: readonly Gateway[];
+  dispose?: () => void;
 };
 
 export type RouteRegistrationResult = {
   wsHandlers: WsUpgradeHandler[];
   routes: readonly Gateway[];
+  dispose?: () => void;
 };
 
 export class ProxyManager {
   private constructor(
     private readonly sources: CompositeRouteSource,
     private readonly registrar: RouteRegistrar,
+    private readonly circuitBreakerFactory: CircuitBreakerMiddlewareFactory,
   ) {}
 
   /**
@@ -90,9 +93,10 @@ export class ProxyManager {
       middlewareFactories,
       new ProxyBackendFactory(circuitBreakerFactory),
       new PinoRouteRegistrationLogger(),
+      appEnv.gateway?.prefix ?? "/",
     );
 
-    return new ProxyManager(sources, registrar);
+    return new ProxyManager(sources, registrar, circuitBreakerFactory);
   }
 
   /**
@@ -103,7 +107,7 @@ export class ProxyManager {
   static async build(router: Router): Promise<ProxyBuildResult> {
     const manager = ProxyManager.create(router);
     const { wsHandlers, routes } = await manager.registerProxyRoutes();
-    return { router, wsHandlers, routes };
+    return { router, wsHandlers, routes, dispose: manager.dispose.bind(manager) };
   }
 
   async registerProxyRoutes(): Promise<RouteRegistrationResult> {
@@ -112,7 +116,7 @@ export class ProxyManager {
 
     if (routes.length === 0) {
       logger.warn("No proxy routes configured");
-      return { wsHandlers: [], routes };
+      return { wsHandlers: [], routes, dispose: this.dispose.bind(this) };
     }
 
     const wsHandlers = routes.flatMap((route) => {
@@ -120,6 +124,11 @@ export class ProxyManager {
       return handler ? [handler] : [];
     });
 
-    return { wsHandlers, routes };
+    return { wsHandlers, routes, dispose: this.dispose.bind(this) };
+  }
+
+  private dispose(): void {
+    this.registrar.dispose();
+    this.circuitBreakerFactory.stopProbers();
   }
 }

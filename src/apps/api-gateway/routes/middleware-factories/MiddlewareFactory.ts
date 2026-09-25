@@ -10,4 +10,5 @@ import type { Gateway } from "../../types/gateway";
  */
 export interface MiddlewareFactory {
   create(route: Gateway): RequestHandler | null;
+  dispose?(): void;
 }

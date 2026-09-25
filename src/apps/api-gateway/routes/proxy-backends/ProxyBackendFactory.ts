@@ -24,6 +24,7 @@ export class ProxyBackendFactory {
           route.proxy.targets,
           route.proxy.strategy ?? "round-robin",
           route.proxy.stickyKey,
+          this.circuitBreakerFactory.getTargetBreakers(route) ?? undefined,
         )
       : null;
 

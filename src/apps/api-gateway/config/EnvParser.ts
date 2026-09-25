@@ -4,6 +4,25 @@
  * is absent, empty, or cannot be coerced to the expected type/shape.
  */
 export class EnvParser {
+  static proxyTrust(raw: string | undefined, fallback: boolean | number): boolean | number {
+    if (!raw) {
+      return fallback;
+    }
+
+    const normalized = raw.trim().toLowerCase();
+
+    if (normalized === "true") {
+      return true;
+    }
+
+    if (normalized === "false") {
+      return false;
+    }
+
+    const hops = Number(normalized);
+    return Number.isInteger(hops) && hops >= 0 ? hops : fallback;
+  }
+
   /**
    * Parses a positive integer. Returns `fallback` when `raw` is absent,
    * non-numeric, zero, or negative.

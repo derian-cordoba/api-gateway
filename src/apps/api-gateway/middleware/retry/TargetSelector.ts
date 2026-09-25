@@ -12,6 +12,8 @@ export interface TargetSelector {
 
   /** Notify the selector that the request has completed (e.g. to free connection slot). */
   onComplete(req: Request): void;
+  onSuccess?(req: Request): void;
+  onFailure?(req: Request): void;
 }
 
 /** Always returns the same fixed URL. Used when there is a single upstream target. */
@@ -37,5 +39,13 @@ export class LoadBalancedTargetSelector implements TargetSelector {
 
   onComplete(req: Request): void {
     this.balancer.onConnectionClosed(req);
+  }
+
+  onSuccess(req: Request): void {
+    this.balancer.recordSuccess(req);
+  }
+
+  onFailure(req: Request): void {
+    this.balancer.recordFailure(req);
   }
 }

@@ -12,6 +12,7 @@ export interface UpstreamRequest {
   target: string;
   req: Request;
   body: Buffer;
+  signal?: AbortSignal;
 }
 
 export interface UpstreamResponse {
@@ -41,9 +42,13 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
     private readonly pathRewrite?: Record<string, string>,
     private readonly requestHeadersConfig?: HeadersConfig["request"],
     private readonly upstreamAuthConfig?: UpstreamAuthConfig,
-  ) {}
+    private readonly proxyHeaders?: Record<string, string>,
+    private readonly method?: string,
+    private readonly changeOrigin = true,
+    private readonly secure = true,
+  ) { }
 
-  send({ target, req, body }: UpstreamRequest): Promise<UpstreamResponse> {
+  send({ target, req, body, signal }: UpstreamRequest): Promise<UpstreamResponse> {
     return new Promise((resolve, reject) => {
       const pathname = this.rewritePath(req.url ?? "/");
       const parsed = new URL(pathname, target);
@@ -52,9 +57,16 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
 
       const outHeaders: Record<string, unknown> = {
         ...req.headers,
-        host: parsed.host,
         "content-length": body.length,
       };
+
+      if (this.changeOrigin) {
+        outHeaders.host = parsed.host;
+      }
+
+      if (this.proxyHeaders) {
+        Object.assign(outHeaders, this.proxyHeaders);
+      }
 
       if (this.requestHeadersConfig?.set) {
         for (const [key, val] of Object.entries(this.requestHeadersConfig.set)) {
@@ -80,7 +92,8 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
           hostname: parsed.hostname,
           port: parsed.port || (useHttps ? 443 : 80),
           path: parsed.pathname + (parsed.search ?? ""),
-          method: req.method,
+          method: this.method ?? req.method,
+          ...(useHttps && { rejectUnauthorized: this.secure }),
           headers: outHeaders as Record<string, string | string[] | number>,
         },
         (upstreamRes) => {
@@ -98,6 +111,15 @@ export class NodeHttpUpstreamClient implements UpstreamHttpClient {
       );
 
       upstreamReq.on("error", reject);
+      if (signal) {
+        const abort = (): void => {
+          upstreamReq.destroy(new Error("Upstream request aborted"));
+          reject(new Error("Upstream request aborted"));
+        };
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+        upstreamReq.once("close", () => signal.removeEventListener("abort", abort));
+      }
       if (body.length > 0) {
         upstreamReq.write(body);
       }

@@ -24,6 +24,22 @@ export const GatewaySchema = z.object({
   cors: RouteCorsSchema.optional(),
   validation: ValidationSchema.optional(),
   webhook: WebhookSchema.optional(),
+}).superRefine((route, context) => {
+  if (route.proxy.ws && route.retry) {
+    context.addIssue({
+      code: "custom",
+      path: ["retry"],
+      message: "WebSocket routes cannot use the HTTP retry backend",
+    });
+  }
+
+  if ((route.proxy.upstreamAuth || route.proxy.mirror) && !route.retry) {
+    context.addIssue({
+      code: "custom",
+      path: ["retry"],
+      message: "proxy.upstreamAuth and proxy.mirror require a retry configuration",
+    });
+  }
 });
 
 export const GatewaysSchema = z.array(GatewaySchema);

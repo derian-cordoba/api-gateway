@@ -42,6 +42,8 @@ export const ProxySchema = z
       .optional(),
     timeout: z.number().positive("Proxy timeout must be a positive number").optional(),
     ws: z.boolean().optional(),
+    maxConnections: z.number().int().positive().optional(),
+    idleTimeoutMs: z.number().int().positive().optional(),
     upstreamAuth: UpstreamAuthSchema.optional(),
     mirror: MirrorSchema.optional(),
   })
@@ -60,4 +62,8 @@ export const ProxySchema = z
   .refine((d) => d.strategy !== "sticky" || d.stickyKey !== undefined, {
     message: 'strategy "sticky" requires stickyKey to be set',
     path: ["stickyKey"],
+  })
+  .refine((d) => d.ws || (d.maxConnections === undefined && d.idleTimeoutMs === undefined), {
+    message: "maxConnections and idleTimeoutMs require ws to be enabled",
+    path: ["ws"],
   });

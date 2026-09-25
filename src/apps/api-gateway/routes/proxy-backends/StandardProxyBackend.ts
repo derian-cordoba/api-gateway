@@ -60,6 +60,7 @@ export class StandardProxyBackend implements ProxyBackend {
     // construction deterministic and free of side-channel properties.
     const options: Options = {
       changeOrigin: this.route.proxy.changeOrigin,
+      secure: this.route.proxy.isSecure,
       pathRewrite: this.route.proxy.pathRewrite,
       headers: this.route.proxy.headers,
       method: this.route.proxy.method,

@@ -21,11 +21,17 @@ function bootstrap(): void {
 
   app.start().catch(handleError);
 
-  // Handle process termination signals
-  process.on("SIGINT", async () => {
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, "Shutting down gateway");
     await app.stop();
     process.exit(0);
-  });
+  };
+
+  process.on("SIGINT", () => { void shutdown("SIGINT"); });
+  process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
 
   process.on("uncaughtException", async (error: Error) => {
     logger.error({ err: error }, "uncaughtException");
@@ -35,6 +41,10 @@ function bootstrap(): void {
       // ignore stop errors during crash shutdown
     }
     process.exit(1);
+  });
+
+  process.on("unhandledRejection", (reason: unknown) => {
+    logger.error({ err: toError(reason) }, "unhandledRejection");
   });
 }
 

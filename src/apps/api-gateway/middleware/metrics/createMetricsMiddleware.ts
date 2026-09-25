@@ -30,6 +30,10 @@ export function createMetricsMiddleware(
       if (res.getHeader("X-Cache") === "HIT") {
         collector.cacheHits.inc({ route });
       }
+
+      if (res.getHeader("X-Cache") === "STALE") {
+        collector.cacheStaleHits.inc({ route });
+      }
     });
 
     next();

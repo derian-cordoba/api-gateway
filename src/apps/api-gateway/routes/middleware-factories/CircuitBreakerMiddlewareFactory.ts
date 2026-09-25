@@ -16,6 +16,7 @@ import { ErrorResponseFactory } from "../../middleware/ErrorResponseFactory";
  */
 export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
   private readonly breakers = new Map<string, CircuitBreaker>();
+  private readonly targetBreakers = new Map<string, ReadonlyMap<string, CircuitBreaker>>();
   private readonly probers = new Map<string, HealthProber>();
 
   create(route: Gateway): RequestHandler | null {
@@ -23,6 +24,15 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
 
     const breaker = new CircuitBreaker(route.circuitBreaker, route.baseURL);
     this.breakers.set(route.baseURL, breaker);
+    if (route.proxy.targets) {
+      const perTarget = new Map(
+        route.proxy.targets.map((target) => [
+          target.url,
+          new CircuitBreaker(route.circuitBreaker!, `${route.baseURL}:${target.url}`),
+        ] as const),
+      );
+      this.targetBreakers.set(route.baseURL, perTarget);
+    }
 
     if (route.circuitBreaker.healthCheck) {
       const prober = new HealthProber(breaker, route.circuitBreaker.healthCheck);
@@ -61,11 +71,17 @@ export class CircuitBreakerMiddlewareFactory implements MiddlewareFactory {
     return this.breakers.get(route.baseURL) ?? null;
   }
 
+  getTargetBreakers(route: Gateway): ReadonlyMap<string, CircuitBreaker> | null {
+    return this.targetBreakers.get(route.baseURL) ?? null;
+  }
+
   /** Stop all active health probers. Call during hot-reload to clean up timers. */
   stopProbers(): void {
     for (const prober of this.probers.values()) {
       prober.stop();
     }
     this.probers.clear();
+    this.targetBreakers.clear();
+    this.breakers.clear();
   }
 }

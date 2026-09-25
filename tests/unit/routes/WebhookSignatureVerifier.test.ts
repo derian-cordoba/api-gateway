@@ -20,7 +20,7 @@ describe("webhook signature verifiers", () => {
 
   it("verifies Stripe's timestamped HMAC-SHA256 signature", () => {
     const verifier = new StripeWebhookSignatureVerifier({ provider: "stripe", secret });
-    const timestamp = "1700000000";
+    const timestamp = String(Math.floor(Date.now() / 1000));
     const digest = createHmac("sha256", secret)
       .update(`${timestamp}.${rawBody.toString("utf-8")}`)
       .digest("hex");
@@ -28,6 +28,32 @@ describe("webhook signature verifiers", () => {
     expect(verifier.signatureHeaderName).toBe("stripe-signature");
     expect(verifier.verify(rawBody, `t=${timestamp},v1=${digest}`)).toBe(true);
     expect(verifier.verify(rawBody, `t=${timestamp}`)).toBe(false);
+  });
+
+  it("rejects stale timestamps and accepts any valid v1 signature", () => {
+    const verifier = new StripeWebhookSignatureVerifier({ provider: "stripe", secret });
+    const timestamp = String(Math.floor(Date.now() / 1000) - 600);
+    const digest = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody.toString("utf-8")}`)
+      .digest("hex");
+
+    expect(verifier.verify(rawBody, `t=${timestamp},v1=invalid,v1=${digest}`)).toBe(false);
+  });
+
+  it("can reject replayed Stripe signatures", () => {
+    const verifier = new StripeWebhookSignatureVerifier({
+      provider: "stripe",
+      secret,
+      replayProtection: true,
+    });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const digest = createHmac("sha256", secret)
+      .update(`${timestamp}.${rawBody.toString("utf-8")}`)
+      .digest("hex");
+    const header = `t=${timestamp},v1=${digest}`;
+
+    expect(verifier.verify(rawBody, header)).toBe(true);
+    expect(verifier.verify(rawBody, header)).toBe(false);
   });
 
   it("verifies a custom provider using its configured header and algorithm", () => {

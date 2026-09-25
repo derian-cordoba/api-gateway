@@ -11,13 +11,19 @@ import type { ProxyEventPlugin } from "./ProxyEventPlugin";
  * strategy; all other strategies ignore `onConnectionClosed`.
  */
 export class LoadBalancerPlugin implements ProxyEventPlugin {
-  constructor(private readonly balancer: LoadBalancer) {}
+  constructor(private readonly balancer: LoadBalancer) { }
 
-  onProxyRes(_proxyRes: IncomingMessage, req: IncomingMessage): void {
+  onProxyRes(proxyRes: IncomingMessage, req: IncomingMessage): void {
+    if (proxyRes.statusCode && proxyRes.statusCode >= 500) {
+      this.balancer.recordFailure(req);
+    } else {
+      this.balancer.recordSuccess(req);
+    }
     this.balancer.onConnectionClosed(req);
   }
 
   onError(_err: Error, req: IncomingMessage, _res: ServerResponse | Socket): void {
+    this.balancer.recordFailure(req);
     this.balancer.onConnectionClosed(req);
   }
 }

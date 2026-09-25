@@ -19,6 +19,7 @@ export class RouteReloader {
 
   private innerRouter: ExpressRouter = ExpressRouter();
   private activeWsHandlers: WsUpgradeHandler[] = [];
+  private disposeActiveRoutes: (() => void) | null = null;
   private watcher: FSWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -61,6 +62,8 @@ export class RouteReloader {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+    this.disposeActiveRoutes?.();
+    this.disposeActiveRoutes = null;
   }
 
   // ── Private ──────────────────────────────────────────────────────────────
@@ -69,10 +72,12 @@ export class RouteReloader {
     try {
       logger.info("Reloading routes config...");
       const newRouter = ExpressRouter();
-      const { router, wsHandlers, routes } = await ProxyManager.build(newRouter);
+      const { router, wsHandlers, routes, dispose } = await ProxyManager.build(newRouter);
       // JS assignment is single-threaded — new requests see the new router immediately
+      this.disposeActiveRoutes?.();
       this.innerRouter = router as ExpressRouter;
       this.activeWsHandlers = wsHandlers;
+      this.disposeActiveRoutes = dispose ?? null;
       logger.info("Routes reloaded successfully");
       this.onReloaded?.(routes);
     } catch (err) {

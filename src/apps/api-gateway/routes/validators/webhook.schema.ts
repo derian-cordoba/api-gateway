@@ -12,6 +12,8 @@ const StripeWebhookSchema = z.object({
   secret: z.string().min(1, "webhook.secret must not be empty"),
   headerName: z.string().optional(),
   hashAlgorithm: z.string().optional(),
+  toleranceSeconds: z.number().int().positive().optional(),
+  replayProtection: z.boolean().optional(),
 });
 
 const CustomWebhookSchema = z.object({

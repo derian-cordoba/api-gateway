@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { withErrorContext } from "@shared/errors/withErrorContext";
@@ -6,15 +6,24 @@ import { isErrorWithCode } from "@shared/errors/isErrorWithCode";
 import { ConfigurationConflictError } from "../errors/ConfigurationConflictError";
 import { createConfigurationRevision } from "./ConfigurationRevision";
 import { validateConfiguration } from "./configuration-validation";
-import type { GatewayRoute, RouteConfigStore, StoredRouteConfig } from "./configuration.types";
+import type {
+  ConfigurationHistoryEntry,
+  GatewayRoute,
+  RouteConfigStore,
+  StoredRouteConfig,
+} from "./configuration.types";
 
 const EMPTY_DOCUMENT = "[]\n";
+const MAX_HISTORY_ENTRIES = 50;
+const writeLocks = new Map<string, Promise<void>>();
 
 export class LocalJsonRouteConfigStore implements RouteConfigStore {
   readonly filePath: string;
+  private readonly historyPath: string;
 
   constructor(filePath = resolveRoutesFilePath()) {
     this.filePath = filePath;
+    this.historyPath = `${filePath}.history`;
   }
 
   async read(): Promise<StoredRouteConfig> {
@@ -52,6 +61,25 @@ export class LocalJsonRouteConfigStore implements RouteConfigStore {
   }
 
   async write(routes: GatewayRoute[], expectedRevision?: string): Promise<StoredRouteConfig> {
+    const previous = writeLocks.get(this.filePath) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    writeLocks.set(this.filePath, current);
+    await previous;
+    try {
+      return await this.writeUnlocked(routes, expectedRevision);
+    } finally {
+      release();
+      if (writeLocks.get(this.filePath) === current) writeLocks.delete(this.filePath);
+    }
+  }
+
+  private async writeUnlocked(
+    routes: GatewayRoute[],
+    expectedRevision?: string,
+  ): Promise<StoredRouteConfig> {
     const validation = validateConfiguration(routes);
     if (!validation.success) {
       throw new Error("Refusing to persist an invalid route configuration.");
@@ -68,6 +96,23 @@ export class LocalJsonRouteConfigStore implements RouteConfigStore {
     await mkdir(directory, { recursive: true });
 
     try {
+      if (current.updatedAt !== null) {
+        await mkdir(this.historyPath, { recursive: true });
+        await writeFile(
+          resolve(this.historyPath, `${current.revision}.json`),
+          `${JSON.stringify(current.routes, null, 2)}\n`,
+          { encoding: "utf8", mode: 0o600 },
+        );
+        const historyNames = (await readdir(this.historyPath))
+          .filter((name) => name.endsWith(".json"))
+          .sort()
+          .reverse();
+        await Promise.all(
+          historyNames
+            .slice(MAX_HISTORY_ENTRIES)
+            .map((name) => unlink(resolve(this.historyPath, name)).catch(() => undefined)),
+        );
+      }
       await writeFile(temporaryPath, content, { encoding: "utf8", mode: 0o600 });
       await rename(temporaryPath, this.filePath);
       await chmod(this.filePath, 0o600);
@@ -77,6 +122,37 @@ export class LocalJsonRouteConfigStore implements RouteConfigStore {
     }
 
     return this.read();
+  }
+
+  async listHistory(): Promise<ConfigurationHistoryEntry[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.historyPath);
+    } catch (error) {
+      if (isErrorWithCode(error, "ENOENT")) {
+        return [];
+      }
+      throw error;
+    }
+
+    const entries = await Promise.all(
+      names
+        .filter((name) => name.endsWith(".json"))
+        .map(async (name) => {
+          const details = await stat(resolve(this.historyPath, name));
+          return {
+            revision: name.slice(0, -5),
+            updatedAt: details.mtime.toISOString(),
+          };
+        }),
+    );
+    return entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async restore(revision: string, expectedRevision?: string): Promise<StoredRouteConfig> {
+    const content = await readFile(resolve(this.historyPath, `${revision}.json`), "utf8");
+    const routes = JSON.parse(content) as GatewayRoute[];
+    return this.write(routes, expectedRevision);
   }
 }
 

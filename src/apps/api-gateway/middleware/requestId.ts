@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { getHeaderValue } from "../../../shared/http/getHeaderValue";
 
 export const REQUEST_ID_HEADER = "x-request-id";
+const MAX_REQUEST_ID_LENGTH = 128;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 /**
  * Ensures every request carries a unique X-Request-ID header.
@@ -17,7 +19,12 @@ export const REQUEST_ID_HEADER = "x-request-id";
  */
 export function createRequestIdMiddleware(): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const requestId = getHeaderValue(req.headers[REQUEST_ID_HEADER]) || randomUUID();
+    const candidate = getHeaderValue(req.headers[REQUEST_ID_HEADER]);
+    const requestId = candidate !== undefined
+      && candidate.length <= MAX_REQUEST_ID_LENGTH
+      && REQUEST_ID_PATTERN.test(candidate)
+      ? candidate
+      : randomUUID();
 
     req.headers[REQUEST_ID_HEADER] = requestId;
     res.set(REQUEST_ID_HEADER, requestId);

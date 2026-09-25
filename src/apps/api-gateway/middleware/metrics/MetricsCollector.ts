@@ -8,6 +8,7 @@ export class MetricsCollector {
   readonly requestDuration: Histogram<"route" | "method">;
   readonly upstreamErrors: Counter<"route" | "error_type">;
   readonly cacheHits: Counter<"route">;
+  readonly cacheStaleHits: Counter<"route">;
 
   constructor(registry?: Registry) {
     this.registry = registry ?? new Registry();
@@ -37,6 +38,13 @@ export class MetricsCollector {
     this.cacheHits = new Counter({
       name: "gateway_cache_hits_total",
       help: "Total number of cache hits served without proxying",
+      labelNames: ["route"],
+      registers: [this.registry],
+    });
+
+    this.cacheStaleHits = new Counter({
+      name: "gateway_cache_stale_hits_total",
+      help: "Total number of stale-while-revalidate responses served from cache",
       labelNames: ["route"],
       registers: [this.registry],
     });

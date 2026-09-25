@@ -55,4 +55,11 @@ describe("createRequestIdMiddleware", () => {
     expect(typeof responseId).toBe("string");
     expect(responseId.length).toBeGreaterThan(0);
   });
+
+  it("regenerates IDs containing unsafe characters or excessive length", async () => {
+    const res = await request.get("/test").set(REQUEST_ID_HEADER, "x".repeat(129));
+    expect(res.headers[REQUEST_ID_HEADER]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+  });
 });

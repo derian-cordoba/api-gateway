@@ -104,6 +104,12 @@ export declare type Proxy = {
    */
   ws?: boolean;
 
+  /** Maximum simultaneous WebSocket connections for this route. */
+  maxConnections?: number;
+
+  /** Close idle WebSocket connections after this many milliseconds. */
+  idleTimeoutMs?: number;
+
   /**
    * HMAC-based authentication for outgoing upstream requests.
    * When configured, the gateway adds a signature header to every upstream

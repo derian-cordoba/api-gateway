@@ -19,6 +19,7 @@ export class Server {
     this.prefix = appEnv.gateway.prefix;
     this.router = new Router();
     this.app = express();
+    this.app.set("trust proxy", appEnv.gateway.trustProxy);
     this.httpServer = createServer(this.app);
     this.eventBus = new GatewayEventBus();
   }

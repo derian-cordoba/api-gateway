@@ -56,20 +56,21 @@ A generic, configuration-driven HTTP API gateway. Routes incoming requests to up
 - **Per-route rate limiting** — each route can declare its own `max` requests / `windowMs` window, enforced by `express-rate-limit`
 - **Per-route circuit breaker** — automatically stops forwarding to a failing upstream after a configurable failure threshold, returning `503` until the service recovers; prevents cascading failures across your stack
 - **Request ID propagation** — every request receives a `X-Request-ID` header (generated UUID v4 if absent, forwarded unchanged if already set); the same ID appears in the response header, every gateway log line, and the request forwarded to the upstream — enabling end-to-end request tracing with no external infrastructure
+- **W3C trace context propagation** — incoming `traceparent` context is preserved with a new span ID, generated when absent, and forwarded to upstream services alongside `X-Trace-ID`
 - **IP allowlist / blocklist** — per-route IPv4 and CIDR-range filtering; deny list is evaluated first, allow list restricts access to specified addresses only; IPv4-mapped IPv6 addresses are normalised automatically
-- **Load balancing** — distribute traffic across multiple upstream targets with four strategies: `round-robin` (default), `weighted` (proportional weight per target), `least-connections` (always forwards to the least-busy upstream), and `sticky` (session-affinity — routes a given client to the same upstream on every request); fully composable with auth, rate limiting, and the circuit breaker
+- **Load balancing** — distribute traffic across multiple upstream targets with four strategies: `round-robin` (default), `weighted` (proportional weight per target), `least-connections` (always forwards to the least-busy upstream), and `sticky` (session-affinity — routes a given client to the same upstream on every request); when a circuit breaker is configured, open targets are skipped automatically
 - **Per-route request timeout** — set `proxy.timeout` on any route to cap how long the gateway waits for an upstream response; slow upstreams receive a `504 Gateway Timeout` and the upstream connection is aborted
 - **WebSocket proxying** — enable `ws: true` on any route to proxy WebSocket upgrade requests transparently; all subsequent frames are tunnelled to the upstream without additional configuration
 - **Startup validation** — route config is validated with Zod at boot time; the process exits with a descriptive error rather than silently misbehaving
 - **Structured logging** — `pino` + `pino-http` emit newline-delimited JSON in production and human-readable output (via `pino-pretty`) in development
 - **Security headers** — full `helmet` defaults applied to every response (`CSP`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`, etc.)
 - **Configurable CORS** — origins, methods, and allowed headers controlled via environment variables
-- **Health check endpoint** — `GET /health` returns uptime, version, and timestamp; always available regardless of configured routes
+- **Health endpoints** — `GET /health` and `/health/live` report process liveness; `/health/ready` reports whether route configuration has loaded and returns `503` while the gateway is starting
 - **Optional URL prefix** — mount all routes under a shared prefix (e.g. `/api/v1`) via `GATEWAY_PREFIX`
 - **Body forwarding** — JSON bodies on `POST`, `PUT`, and `PATCH` requests are correctly forwarded to upstreams (`fixRequestBody`)
-- **Retry with backoff** — configurable retries for HTTP failures and network errors; the route backend currently uses fixed delays, while exponential and jitter strategy classes are available for custom executor composition
-- **In-memory response caching** — cache upstream responses per route with a configurable TTL; cache hits bypass the upstream entirely and return the stored response with an `X-Cache: HIT` header; configurable by HTTP method and status code
-- **Prometheus metrics endpoint** — `GET /metrics` exposes `gateway_requests_total`, `gateway_request_duration_seconds`, `gateway_upstream_errors_total`, and `gateway_cache_hits_total` in Prometheus text format; labelled by route and method for easy dashboarding
+- **Retry with backoff** — configurable retries for HTTP failures and network errors with fixed, exponential, and exponential-jitter delays; method-aware retry eligibility and optional in-flight request collapsing
+- **In-memory response caching** — cache upstream responses per route with a configurable TTL; cache hits bypass the upstream entirely and return the stored response with an `X-Cache: HIT` header; configurable by HTTP method and status code; Authorization and cookie identities are isolated, and `private`/`no-store` responses are not stored
+- **Prometheus metrics endpoint** — `GET /metrics` exposes request totals, latency, upstream errors, cache hits, and stale-cache hits in Prometheus text format; labelled by route and method for easy dashboarding
 - **Per-route header transformation** — add, override, or remove individual headers on the outgoing upstream request and/or the response returned to the client; no code changes needed when onboarding a new upstream with different header conventions
 - **Route-level CORS override** — each route can declare its own CORS policy (origin, methods, allowed headers, credentials, preflight `maxAge`) that takes precedence over the global configuration; preflight `OPTIONS` requests are handled entirely by the gateway for routes that have a cors block
 - **OAuth 2.0 token introspection** — fourth auth strategy that validates opaque Bearer tokens by calling an RFC 7662 introspection endpoint; the gateway authenticates to the introspection endpoint using HTTP Basic auth with configurable `clientId` / `clientSecret`
@@ -130,7 +131,7 @@ The dashboard is available at `http://localhost:3001` and uses the same `routes.
 cp src/apps/dashboard/.env.example src/apps/dashboard/.env.local
 ```
 
-Dashboard writes are validated by the gateway's Zod schemas, guarded by a configuration revision, written through a temporary file, and atomically renamed. The gateway watches the containing directory so these atomic updates activate without restarting either application.
+Dashboard writes are validated by the gateway's Zod schemas, guarded by a configuration revision, written through a temporary file, and atomically renamed. Previous revisions are retained beside the route file and can be listed or restored from the Settings page. The gateway watches the containing directory so these atomic updates activate without restarting either application.
 
 Set `DASHBOARD_TOKEN` outside local development. The browser token can then be entered on the dashboard Settings page; it is stored only in that browser.
 
@@ -162,6 +163,7 @@ Copy `.env.example` to `.env` and edit as needed.
 | `GATEWAY_PORT` | `3000` | Port the gateway listens on. Takes priority over `PORT`. |
 | `PORT` | `3000` | Fallback port when `GATEWAY_PORT` is not set. |
 | `GATEWAY_PREFIX` | _(none)_ | Optional path prefix for all routes. Example: `/api/v1` makes proxy routes reachable at `/api/v1/<baseURL>` and the health check at `/api/v1/health`. |
+| `TRUST_PROXY` | `false` | Controls Express client-IP resolution for reverse-proxy deployments. Accepts `true`, `false`, or a non-negative hop count. |
 
 #### Logging
 
@@ -239,6 +241,8 @@ Exactly one of `target` or `targets` must be provided.
 | `strategy` | `"round-robin" \| "weighted" \| "least-connections" \| "sticky"` | — | Load-balancing strategy. Only valid with `targets`. Defaults to `"round-robin"`. |
 | `stickyKey` | `string` | — | Required for `"sticky"`; accepts `"ip"`, `"header:<name>"`, `"jwt:<claim>"`, `"cookie:<name>"`, or `"query:<name>"`. There is no schema default. |
 | `ws` | `boolean` | — | Enable WebSocket proxying for this route. |
+| `maxConnections` | `number` | — | Maximum concurrent WebSocket connections for the route. Requires `ws: true`. |
+| `idleTimeoutMs` | `number` | — | Close idle WebSocket connections after this duration. Requires `ws: true`. |
 | `changeOrigin` | `boolean` | — | Rewrite the `Host` header to the target origin. |
 | `pathRewrite` | `{ [pattern]: replacement }` | — | Regex path rewrite rules applied before forwarding. |
 | `headers` | `{ [name]: value }` | — | Extra headers added to every forwarded request. |
@@ -356,11 +360,11 @@ Automatically retries failed upstream requests (5xx responses or network errors)
 |---|---|---|---|
 | `attempts` | `number (1–10)` | ✅ | Maximum number of retry attempts after the first failure. |
 | `delay` | `number` | ✅ | Base delay in milliseconds between retries. |
-| `backoff` | `"fixed" \| "exponential" \| "exponential-jitter"` | — | Accepted strategy names; see the current backend limitation under [Backoff strategies](#backoff-strategies). |
+| `backoff` | `"fixed" \| "exponential" \| "exponential-jitter"` | — | Backoff strategy used by the retry executor. |
 | `retryOn` | `number[]` | — | Explicit list of HTTP status codes that should trigger a retry (e.g. `[500, 502, 503]`). When omitted, all 5xx responses are retried. Each code must be in the 400–599 range. |
-| `retryMethods` | `string[]` | — | Methods eligible for HTTP-status retries; defaults to `GET`, `HEAD`, and `OPTIONS`. Network errors currently retry independently of this list. |
+| `retryMethods` | `string[]` | — | Methods eligible for HTTP-status and network-error retries; defaults to `GET`, `HEAD`, and `OPTIONS`. |
 | `fallback` | `{ status?: number; body?: unknown }` | — | Response for thrown proxy/retry errors. Status defaults to 502. Does not replace a final HTTP error response returned by the upstream. |
-| `collapseRequests` | `boolean` | — | Share concurrent `GET`, `HEAD`, or `OPTIONS` work by method and URL. Defaults to false. Headers and caller identity are not part of the key. |
+| `collapseRequests` | `boolean` | — | Share concurrent `GET`, `HEAD`, or `OPTIONS` work by method and URL. Defaults to false. Each caller keeps an independent cancellation signal. |
 
 #### `Cache`
 
@@ -371,6 +375,8 @@ Caches successful upstream responses in memory per route. Cache hits bypass the 
 | `ttl` | `number` | ✅ | Time-to-live in milliseconds. |
 | `methods` | `string[]` | — | HTTP methods to cache. Defaults to `["GET", "HEAD"]`. |
 | `statusCodes` | `number[]` | — | HTTP status codes to cache. Defaults to `[200, 203, 204]`. |
+| `staleWhileRevalidateMs` | `number` | — | Serve stale entries while one request refreshes the upstream entry. |
+| `evictionIntervalMs` | `number` | — | Optional periodic cleanup interval for expired in-memory entries. |
 
 #### `Headers`
 
@@ -790,7 +796,7 @@ Set `webhook` to verify incoming signatures before forwarding. The gateway retai
 | Provider | Signature header | Signed content and encoding |
 | --- | --- | --- |
 | `github` | `x-hub-signature-256` | HMAC-SHA256 of raw body; header value `sha256=<hex>` |
-| `stripe` | `stripe-signature` | HMAC-SHA256 of `<timestamp>.<UTF-8 body>`; header `t=<timestamp>,v1=<hex>` |
+| `stripe` | `stripe-signature` | HMAC-SHA256 of `<timestamp>.<UTF-8 body>`; header `t=<timestamp>,v1=<hex>`; timestamp tolerance defaults to 300 seconds |
 | `custom` | Required `headerName`, normalized to lowercase | Raw-body HMAC hex digest using `hashAlgorithm` (default `sha256`) |
 
 All providers require a nonempty `secret`. GitHub and Stripe use fixed headers and algorithms; optional `headerName` and `hashAlgorithm` values are ignored for those providers. Custom configuration looks like:
@@ -804,7 +810,7 @@ All providers require a nonempty `secret`. GitHub and Stripe use fixed headers a
 }
 ```
 
-Missing or invalid signatures return 401. Unavailable raw body returns 400. Stripe currently checks the first `t` and `v1` entries only and does not enforce timestamp freshness or replay prevention.
+Missing, invalid, or stale signatures return 401. Unavailable raw body returns 400. Stripe accepts any matching `v1` signature and enforces timestamp freshness. Set `replayProtection: true` to reject repeated timestamp/signature pairs within the process.
 
 The library exports `WebhookConfig` as a discriminated union of `GitHubWebhookConfig`, `StripeWebhookConfig`, and `CustomWebhookConfig`, plus `WebhookProvider`. Provider verifier classes own header and signature rules; `WebhookMiddlewareFactory` delegates through a verifier resolver.
 
@@ -1147,7 +1153,7 @@ Enable WebSocket proxying by adding `"ws": true` to any proxy configuration. The
 
 ### How it works
 
-Standard HTTP requests to `/chat` are proxied normally. When a client sends an HTTP Upgrade request, the gateway attaches the proxy middleware's upgrade handler to the raw HTTP server's `upgrade` event, so WebSocket connections are forwarded at the transport level without involving Express middleware.
+Standard HTTP requests to `/chat` are proxied normally. When a client sends an HTTP Upgrade request, the gateway attaches the proxy middleware's upgrade handler to the raw HTTP server's `upgrade` event. Route authentication is explicitly evaluated for the upgrade because Express middleware does not run on this event. Optional `maxConnections` and `idleTimeoutMs` limits protect the route from unbounded socket usage.
 
 ### Usage
 
@@ -1320,11 +1326,11 @@ With `attempts: 3`, the gateway calls the upstream up to 4 times total (1 initia
 | `"exponential"` | `delay × 2^n` | 200 ms, 400 ms, 800 ms |
 | `"exponential-jitter"` | Uniform random value below `delay × 2^n` | Below 200 ms, 400 ms, 800 ms |
 
-The exponential strategies use `RETRY_BACKOFF_MULTIPLIER` (default 2). These strategy classes exist, but the current route backend constructs `RetryExecutor` with its default `FixedBackoff`; selecting `backoff` in route JSON does not yet change the actual delays. A custom executor can receive an explicit strategy.
+The exponential strategies use `RETRY_BACKOFF_MULTIPLIER` (default 2). Route configuration selects the strategy through the same factory used by the public `RetryExecutor` API.
 
 ### Retry methods, fallback, and request collapsing
 
-By default, only GET, HEAD, and OPTIONS responses are eligible for HTTP-status retries. Set `retryMethods` to opt other methods in. Network errors currently retry regardless of `retryMethods`, so this option is not a guarantee against repeating a write after a transport failure.
+By default, only GET, HEAD, and OPTIONS requests are eligible for HTTP-status and network-error retries. Set `retryMethods` to opt other methods in. Only opt write methods in when the upstream operation is idempotent.
 
 ```json
 {
@@ -1346,7 +1352,7 @@ By default, only GET, HEAD, and OPTIONS responses are eligible for HTTP-status r
 
 `fallback` handles thrown proxy/retry errors, such as exhausted network failures. A final HTTP response from the upstream is forwarded, even when its status is retryable; it does not activate this fallback. Circuit-breaker `fallback` is separate and applies when its guard rejects a request.
 
-`collapseRequests` shares one in-flight execution among concurrent GET, HEAD, or OPTIONS requests with the same method and URL. It is not response caching. The key excludes authorization, cookies, headers, and body, so enable it only where those differences cannot change the response, such as a public catalog. Shared requests also use the initiating execution's abort signal.
+`collapseRequests` shares one in-flight execution among concurrent GET, HEAD, or OPTIONS requests with the same method and URL. It is not response caching. The key excludes authorization, cookies, headers, and body, so enable it only where those differences cannot change the response, such as a public catalog. Each caller has an independent cancellation signal; cancelling one client does not cancel other subscribers.
 
 ### Response when all attempts fail
 
@@ -1459,6 +1465,7 @@ GET /metrics
 | `gateway_request_duration_seconds` | Histogram | `route`, `method` | End-to-end request latency in seconds (client → upstream → client). |
 | `gateway_upstream_errors_total` | Counter | `route`, `error_type` | Upstream errors (5xx responses or network errors) per route. |
 | `gateway_cache_hits_total` | Counter | `route` | Number of responses served from the in-memory cache per route. |
+| `gateway_cache_stale_hits_total` | Counter | `route` | Number of stale-while-revalidate responses served per route. |
 
 ### Example
 
@@ -1674,6 +1681,8 @@ GET /health
 
 If `GATEWAY_PREFIX` is set, the endpoint is available at `<GATEWAY_PREFIX>/health`.
 
+Use `/health/live` for liveness probes and `/health/ready` for readiness probes. Readiness returns `200` with `status: "ready"` after the initial route configuration has loaded and `503` with `status: "starting"` during startup.
+
 **Response `200 OK`:**
 
 ```json
@@ -1845,7 +1854,7 @@ Compiles the gateway and starts all services with shared example settings, witho
 | `http://localhost:3000/analytics/internal` | IP filter | Analytics service — allow: `127.0.0.1` |
 | `http://localhost:3000/catalog` | Load balancing | Catalog service — round-robin across A, B, C |
 | `ws://localhost:3000/chat` | WebSocket | Chat service — WS echo server |
-| `http://localhost:3000/retry-inventory` | Retry with backoff | Inventory service — up to 3 retries; current backend uses fixed delays |
+| `http://localhost:3000/retry-inventory` | Retry with backoff | Inventory service — up to 3 retries, exponential backoff |
 | `http://localhost:3000/cached-catalog` | Response caching | Catalog service — TTL 30 s, GET/HEAD |
 | `http://localhost:3000/metrics-orders` | Prometheus + cache | Orders service — cached, drives counters |
 | `http://localhost:3000/echo` | Header transformation | Echo server — shows upstream-received headers |
@@ -2129,77 +2138,34 @@ To wire it in, extend `authMiddleware.ts` and add a new `strategy` literal to th
 
 ### Pluggable Cache Backend
 
-By default the response cache uses `MemoryCacheStore` (in-process Map). To share cached responses across multiple gateway instances, implement `CacheStore`:
+By default the response cache uses `MemoryCacheStore` (in-process Map). The package also exports `RedisCacheStore` as an asynchronous adapter. Because the built-in `ResponseCache` contract is synchronous, Redis must be connected through an async-aware cache middleware or application-level adapter; it cannot be passed directly to `ResponseCache`.
 
 ```ts
-import type { CacheStore, CacheEntry } from "@derian-cordoba/api-gateway";
-import { createClient } from "redis";
+import { RedisCacheStore } from "@derian-cordoba/api-gateway";
+import type { AsyncCacheStore, CacheEntry } from "@derian-cordoba/api-gateway";
 
-export class RedisCacheStore implements CacheStore<CacheEntry> {
-  constructor(private readonly client: ReturnType<typeof createClient>) {}
-
-  get(key: string): CacheEntry | null {
-    // Redis calls must be sync in this interface — consider
-    // a synchronous adapter or an async-aware cache layer.
-    throw new Error("Use async get via a caching proxy");
-  }
-
-  set(key: string, entry: CacheEntry): void {
-    void this.client.set(key, JSON.stringify(entry), {
-      PX: entry.expiresAt - Date.now(),
-    });
-  }
-
-  clear(): void {
-    void this.client.flushDb();
-  }
-
-  size(): number {
-    return 0; // approximate
-  }
-}
+const store: AsyncCacheStore<CacheEntry> = new RedisCacheStore(redisClient);
+const entry = await store.get("route-/api/users");
+await store.set("route-/api/users", entryToStore);
 ```
 
-Inject it when constructing `ResponseCache`:
-
-```ts
-import { ResponseCache } from "@derian-cordoba/api-gateway";
-
-const cache = new ResponseCache({ ttl: 60_000, store: new RedisCacheStore(redisClient) });
-```
+The built-in route cache remains synchronous and uses `MemoryCacheStore`; wiring Redis into request handling requires an async-aware application adapter.
 
 ---
 
 ### Distributed Circuit Breaker
 
-The `CircuitBreakerStateStore` interface allows sharing circuit-breaker state across gateway replicas:
+The package exports `RedisCircuitBreakerStateStore` as an asynchronous adapter. The built-in `CircuitBreaker` currently uses synchronous state-store methods, so distributed circuit state requires an async-aware breaker integration or a synchronous client adapter.
 
 ```ts
-import type { CircuitBreakerStateStore, CircuitBreakerSnapshot } from "@derian-cordoba/api-gateway";
-import { CircuitState } from "@derian-cordoba/api-gateway";
+import { RedisCircuitBreakerStateStore } from "@derian-cordoba/api-gateway";
 
-export class RedisStateStore implements CircuitBreakerStateStore {
-  constructor(private readonly client: ReturnType<typeof createClient>) {}
-
-  load(key: string): CircuitBreakerSnapshot | null {
-    const raw = this.client.get(key);  // sync client
-    if (!raw) return null;
-    return JSON.parse(raw) as CircuitBreakerSnapshot;
-  }
-
-  save(key: string, snapshot: CircuitBreakerSnapshot): void {
-    void this.client.set(key, JSON.stringify(snapshot));
-  }
-}
+const store = new RedisCircuitBreakerStateStore(redisClient);
+const snapshot = await store.load("orders");
+await store.save("orders", nextSnapshot);
 ```
 
-Pass the store to `CircuitBreaker`:
-
-```ts
-import { CircuitBreaker } from "@derian-cordoba/api-gateway";
-
-const breaker = new CircuitBreaker(config, baseURL, clock, new RedisStateStore(client));
-```
+The built-in `CircuitBreaker` currently uses synchronous state-store methods. Use an async-aware breaker integration or a synchronous client adapter before sharing state across gateway replicas.
 
 ---
 

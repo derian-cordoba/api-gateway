@@ -1,6 +1,7 @@
 import type { RequestHandler, Request, Response, NextFunction } from "express";
 import type { OutgoingHttpHeader } from "node:http";
 import type { CacheEntry, ResponseCache } from "./ResponseCache";
+import { createHash } from "node:crypto";
 
 // ── Concrete types for response method interception ───────────────────────────
 
@@ -107,13 +108,40 @@ function extractForwardableHeaders(res: Response): Record<string, string | strin
   return headers;
 }
 
+function cacheIdentity(req: Request): string {
+  const authorization = req.headers.authorization;
+  const cookie = req.headers.cookie;
+  if (!authorization && !cookie) return "public";
+  return createHash("sha256")
+    .update(`${authorization ?? ""}\n${cookie ?? ""}`)
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function shouldStoreResponse(res: Response): boolean {
+  const cacheControl = String(res.getHeader("cache-control") ?? "")
+    .toLowerCase();
+
+  return !cacheControl
+    .split(",")
+    .some((directive) => {
+      const normalized = directive.trim();
+      return normalized === "private"
+        || normalized.startsWith("private=")
+        || normalized === "no-store"
+        || normalized.startsWith("no-store=");
+    });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Returns middleware that serves responses from `cache` on hit, and
  * intercepts upstream responses to populate the cache on miss.
  *
- * Cache key: `METHOD:ORIGINAL_URL` (e.g. `GET:/api/users?q=x`)
+ * Cache key: method, original URL, and a short digest of Authorization/cookie
+ * identity. Public requests share entries; authenticated requests do not share
+ * responses across different credentials.
  *
  * Body capture: intercepts `res.write` and `res.end` AFTER the compression
  * middleware has already wrapped them, so captured bytes are pre-compression
@@ -128,9 +156,11 @@ function extractForwardableHeaders(res: Response): Record<string, string | strin
  *   concurrent upstream refreshes.
  */
 export function createCacheMiddleware(cache: ResponseCache): RequestHandler {
+  const refreshingKeys = new Set<string>();
+
   return (req: Request, res: Response, next: NextFunction): void => {
     const method = req.method.toUpperCase();
-    const key = `${method}:${req.originalUrl ?? req.url}`;
+    const key = `${method}:${req.originalUrl ?? req.url}:identity=${cacheIdentity(req)}`;
 
     const result = cache.getWithStaleness(key);
 
@@ -139,7 +169,7 @@ export function createCacheMiddleware(cache: ResponseCache): RequestHandler {
       res.setHeader("X-Cache", "MISS");
 
       new ResponseBodyInterceptor(res, (body) => {
-        if (cache.isCacheable(method, res.statusCode)) {
+        if (cache.isCacheable(method, res.statusCode) && shouldStoreResponse(res)) {
           cache.set(key, {
             status: res.statusCode,
             headers: extractForwardableHeaders(res),
@@ -167,18 +197,31 @@ export function createCacheMiddleware(cache: ResponseCache): RequestHandler {
       return;
     }
 
+    if (refreshingKeys.has(key)) {
+      serveCachedResponse(result.entry, res, "STALE");
+      return;
+    }
+
+    refreshingKeys.add(key);
+    const clearRefreshing = (): void => {
+      refreshingKeys.delete(key);
+    };
+    res.once("finish", clearRefreshing);
+    res.once("close", clearRefreshing);
+
     // Subsequent stale hit with a refresh already flagged: bypass the cache
     // and let this request go to upstream to refresh the stored entry.
     res.setHeader("X-Cache", "MISS");
 
     new ResponseBodyInterceptor(res, (body) => {
-      if (cache.isCacheable(method, res.statusCode)) {
+      if (cache.isCacheable(method, res.statusCode) && shouldStoreResponse(res)) {
         cache.set(key, {
           status: res.statusCode,
           headers: extractForwardableHeaders(res),
           body,
         });
       }
+      clearRefreshing();
     });
 
     next();

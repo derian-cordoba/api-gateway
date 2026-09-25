@@ -35,6 +35,7 @@ export { ExponentialJitterBackoff } from "./middleware/retry/ExponentialJitterBa
 export { JwksKeyStore } from "./middleware/auth/JwksKeyStore";
 export { AuthFailureTracker } from "./middleware/auth/AuthFailureTracker";
 export { ErrorResponseFactory } from "./middleware/ErrorResponseFactory";
+export { createTraceContextMiddleware, TRACEPARENT_HEADER, TRACE_ID_HEADER } from "./middleware/traceContext";
 export { GatewayEventBus } from "./middleware/GatewayEventBus";
 export { InFlightRequestCache } from "./middleware/retry/InFlightRequestCache";
 export { RedisCacheStore } from "./middleware/redis/RedisCacheStore";

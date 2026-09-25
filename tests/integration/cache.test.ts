@@ -15,10 +15,13 @@ const UPSTREAM_PORT = 19_070;
 function startCountingUpstream(): Promise<{ server: HttpServer; getCount: () => number }> {
   let count = 0;
   return new Promise((resolve) => {
-    const server = createServer((_req, res) => {
+    const server = createServer((req, res) => {
       count++;
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ count }));
+      res.end(JSON.stringify({
+        count,
+        identity: req.headers.authorization ?? req.headers.cookie ?? "public",
+      }));
     });
     server.listen(UPSTREAM_PORT, () => resolve({ server, getCount: () => count }));
   });
@@ -48,6 +51,15 @@ describe("Response caching", () => {
           changeOrigin: true,
           pathRewrite: { "^/uncached": "" },
         },
+      },
+      {
+        baseURL: "/identity-cache",
+        proxy: {
+          target: `http://localhost:${UPSTREAM_PORT}`,
+          changeOrigin: true,
+          pathRewrite: { "^/identity-cache": "" },
+        },
+        cache: { ttl: 5000 },
       },
     ]);
 
@@ -91,5 +103,18 @@ describe("Response caching", () => {
     expect(a.headers["x-cache"]).toBe("MISS");
     expect(b.headers["x-cache"]).toBe("MISS");
     expect(a.body.count).not.toBe(b.body.count);
+  });
+
+  it("isolates cached responses by authorization identity", async () => {
+    const alice = await request.get("/identity-cache").set("Authorization", "Bearer alice");
+    const bob = await request.get("/identity-cache").set("Authorization", "Bearer bob");
+    const aliceAgain = await request.get("/identity-cache").set("Authorization", "Bearer alice");
+
+    expect(alice.body.identity).toBe("Bearer alice");
+    expect(bob.body.identity).toBe("Bearer bob");
+    expect(aliceAgain.body.identity).toBe("Bearer alice");
+    expect(alice.headers["x-cache"]).toBe("MISS");
+    expect(bob.headers["x-cache"]).toBe("MISS");
+    expect(aliceAgain.headers["x-cache"]).toBe("HIT");
   });
 });

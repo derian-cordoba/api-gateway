@@ -1,9 +1,11 @@
 import type { BalancerStrategy, WeightedTarget } from "../../types/load-balancer";
 import type { SelectionStrategy } from "./SelectionStrategy";
+import type { CircuitBreaker } from "../circuit-breaker/CircuitBreaker";
 import { RoundRobinSelectionStrategy } from "./RoundRobinSelectionStrategy";
 import { WeightedSelectionStrategy } from "./WeightedSelectionStrategy";
 import { LeastConnectionsSelectionStrategy } from "./LeastConnectionsSelectionStrategy";
 import { StickySelectionStrategy } from "./StickySelectionStrategy";
+import { HealthAwareSelectionStrategy } from "./HealthAwareSelectionStrategy";
 import { RequestKeyExtractorFactory } from "../key-extractors/RequestKeyExtractorFactory";
 import { assertNever } from "../../../../shared/assertions/assertNever";
 
@@ -18,14 +20,21 @@ import { assertNever } from "../../../../shared/assertions/assertNever";
 export class LoadBalancer {
   public readonly strategy: BalancerStrategy;
   private readonly selectionStrategy: SelectionStrategy;
+  private readonly selectedTargets = new WeakMap<object, string>();
+  private readonly breakersByUrl: ReadonlyMap<string, CircuitBreaker>;
 
   constructor(
     targets: readonly WeightedTarget[],
     strategy: BalancerStrategy,
     stickyKey?: string,
+    breakersByUrl?: ReadonlyMap<string, CircuitBreaker>,
   ) {
     this.strategy = strategy;
-    this.selectionStrategy = LoadBalancer.buildStrategy(targets, strategy, stickyKey);
+    const strategyImplementation = LoadBalancer.buildStrategy(targets, strategy, stickyKey);
+    this.breakersByUrl = breakersByUrl ?? new Map();
+    this.selectionStrategy = breakersByUrl && breakersByUrl.size > 0
+      ? new HealthAwareSelectionStrategy(strategyImplementation, breakersByUrl)
+      : strategyImplementation;
   }
 
   createRouterFn(): (req: object) => string {
@@ -39,11 +48,20 @@ export class LoadBalancer {
   selectTarget(req: object): string {
     const url = this.selectionStrategy.pick(req);
     this.selectionStrategy.trackRequest(req, url);
+    this.selectedTargets.set(req, url);
     return url;
   }
 
   onConnectionClosed(req: object): void {
     this.selectionStrategy.onConnectionClosed(req);
+  }
+
+  recordSuccess(req: object): void {
+    this.breakersByUrl.get(this.selectedTargets.get(req) ?? "")?.recordSuccess();
+  }
+
+  recordFailure(req: object): void {
+    this.breakersByUrl.get(this.selectedTargets.get(req) ?? "")?.recordFailure();
   }
 
   getConnectionCounts(): ReadonlyMap<string, number> {

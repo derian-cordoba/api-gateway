@@ -9,6 +9,7 @@ import type { WsUpgradeHandler } from "../ProxyManager";
 import { NodeHttpUpstreamClient } from "../../middleware/retry/UpstreamHttpClient";
 import { SingleTargetSelector, LoadBalancedTargetSelector } from "../../middleware/retry/TargetSelector";
 import { RetryExecutor } from "../../middleware/retry/RetryExecutor";
+import { BackoffStrategyFactory } from "../../middleware/retry/BackoffStrategyFactory";
 import { BodySerializer } from "../../middleware/retry/BodySerializer";
 import { HopByHopHeaderFilter } from "../../middleware/retry/HopByHopHeaderFilter";
 import { RetryExhaustedException } from "../../middleware/retry/RetryExhaustedException";
@@ -39,13 +40,23 @@ export class RetryProxyBackend implements ProxyBackend {
       this.route.proxy.pathRewrite,
       this.route.headers?.request,
       this.route.proxy.upstreamAuth,
+      this.route.proxy.headers,
+      this.route.proxy.method,
+      this.route.proxy.changeOrigin,
+      this.route.proxy.isSecure,
     );
 
     const selector = this.balancer
       ? new LoadBalancedTargetSelector(this.balancer)
       : new SingleTargetSelector(this.route.proxy.target!);
 
-    const executor = new RetryExecutor(this.route.retry!, client, selector, this.breaker);
+    const executor = new RetryExecutor(
+      this.route.retry!,
+      client,
+      selector,
+      this.breaker,
+      BackoffStrategyFactory.fromConfig(this.route.retry!.backoff),
+    );
 
     return async (req: Request, res: Response) => {
       const body = BodySerializer.serialize(req);

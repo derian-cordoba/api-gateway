@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { LoadBalancer } from "../../../../src/apps/api-gateway/middleware/load-balancer/LoadBalancer";
+import { CircuitBreaker } from "../../../../src/apps/api-gateway/middleware/circuit-breaker/CircuitBreaker";
 
 const targets = [
   { url: "http://upstream-a:3001" },
@@ -232,5 +233,17 @@ describe("LoadBalancer", () => {
       expect(counts).toBeDefined();
       expect(counts.size).toBe(2);
     });
+  });
+
+  it("skips targets whose circuit breaker is open", () => {
+    const breakerA = new CircuitBreaker({ threshold: 1, timeout: 60_000 }, "a");
+    const breakerB = new CircuitBreaker({ threshold: 1, timeout: 60_000 }, "b");
+    breakerA.recordFailure();
+    const lb = new LoadBalancer(targets, "round-robin", undefined, new Map([
+      [targets[0].url, breakerA],
+      [targets[1].url, breakerB],
+    ]));
+
+    expect(lb.selectTarget({})).toBe(targets[1].url);
   });
 });
