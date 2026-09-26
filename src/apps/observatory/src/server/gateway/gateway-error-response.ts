@@ -1,5 +1,6 @@
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import { NextResponse } from "next/server";
+import { toError } from "@shared/errors/toError";
 import { GatewayManagementError } from "./GatewayManagementClient";
 
 export function gatewayUnavailableResponse(error: unknown): NextResponse {
@@ -12,7 +13,7 @@ export function gatewayUnavailableResponse(error: unknown): NextResponse {
   return NextResponse.json(
     {
       error: "Gateway unavailable",
-      message: error instanceof Error ? error.message : "Unexpected error",
+      message: toError(error).message,
     },
     { status, headers: { "Cache-Control": "no-store" } },
   );

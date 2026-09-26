@@ -1,11 +1,16 @@
 import type { GatewayEvent } from "@/server/gateway/contracts";
 import { ActivityList } from "./ActivityList";
+import { EventLimitFilter } from "./EventLimitFilter";
 
 export function RecentActivityPanel({
   events,
+  eventLimit,
+  onEventLimitChange,
   updatedAt,
 }: {
   events: GatewayEvent[];
+  eventLimit: number;
+  onEventLimitChange: (limit: number) => void;
   updatedAt: Date | null;
 }) {
   return (
@@ -19,6 +24,7 @@ export function RecentActivityPanel({
               : "Waiting for the first gateway response."}
           </p>
         </div>
+        <EventLimitFilter value={eventLimit} onChange={onEventLimitChange} />
       </div>
       <ActivityList events={events} />
     </section>

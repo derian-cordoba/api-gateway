@@ -9,7 +9,15 @@ import { RecentActivityPanel } from "./RecentActivityPanel";
 import { RoutesPanel } from "./RoutesPanel";
 
 export function Observatory() {
-  const { overview, events, error, updatedAt, refresh } = useObservatoryData();
+  const {
+    overview,
+    events,
+    eventLimit,
+    setEventLimit,
+    error,
+    updatedAt,
+    refresh,
+  } = useObservatoryData();
   const [failingOnly, setFailingOnly] = useState(false);
 
   const routes = useMemo(
@@ -36,7 +44,12 @@ export function Observatory() {
         failingOnly={failingOnly}
         onFailingOnlyChange={setFailingOnly}
       />
-      <RecentActivityPanel events={events} updatedAt={updatedAt} />
+      <RecentActivityPanel
+        events={events}
+        eventLimit={eventLimit}
+        onEventLimitChange={setEventLimit}
+        updatedAt={updatedAt}
+      />
     </main>
   );
 }
