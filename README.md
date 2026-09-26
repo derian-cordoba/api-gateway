@@ -1675,6 +1675,8 @@ kill -HUP $(lsof -ti tcp:3000)
 
 ## Running the Gateway
 
+Dashboard and Observatory share an injectable HTTP manager. See the [networking guide](src/shared/services/networking/README.md) for live and mock transports, request options, cancellation, and error handling.
+
 ### Development (hot-reload)
 
 ```bash

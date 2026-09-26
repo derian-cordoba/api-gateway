@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { HttpMethod } from "@shared/http/HttpMethod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConfigurationService,
@@ -41,10 +42,13 @@ describe("ConfigurationService", () => {
       loading: false,
       error: null,
     });
-    expect(fetchMock).toHaveBeenCalledWith("/api/config", {
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/config",
+      expect.objectContaining({
+        cache: "no-store",
+        headers: new Headers({ "Content-Type": "application/json" }),
+      }),
+    );
     expect(listener).toHaveBeenCalled();
     unsubscribe();
   });
@@ -61,7 +65,7 @@ describe("ConfigurationService", () => {
     const first = service.reload(false);
     const second = service.reload(false);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     resolveRequest(jsonResponse(configuration));
     await expect(Promise.all([first, second])).resolves.toEqual([configuration, configuration]);
   });
@@ -77,7 +81,7 @@ describe("ConfigurationService", () => {
     const unsubscribeFirst = service.subscribe(vi.fn());
     const unsubscribeSecond = service.subscribe(vi.fn());
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     resolveRequest(jsonResponse(configuration));
     await vi.waitFor(() => expect(service.getSnapshot().loading).toBe(false));
     unsubscribeFirst();
@@ -95,7 +99,7 @@ describe("ConfigurationService", () => {
     const first = service.history();
     const second = service.history();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     resolveRequest(jsonResponse({ entries: [{ revision: "previous", updatedAt: "2026-09-17" }] }));
     await expect(Promise.all([first, second])).resolves.toEqual([
       [{ revision: "previous", updatedAt: "2026-09-17" }],
@@ -115,18 +119,21 @@ describe("ConfigurationService", () => {
     const result = await service.save(configuration.routes);
 
     expect(result).toEqual(saved);
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/config", {
-      method: "PUT",
-      body: JSON.stringify({
-        routes: configuration.routes,
-        expectedRevision: configuration.revision,
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/config",
+      expect.objectContaining({
+        method: HttpMethod.PUT,
+        body: JSON.stringify({
+          routes: configuration.routes,
+          expectedRevision: configuration.revision,
+        }),
+        cache: "no-store",
+        headers: new Headers({
+          "Content-Type": "application/json",
+          "X-Dashboard-Token": "dashboard-secret",
+        }),
       }),
-      cache: "no-store",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Dashboard-Token": "dashboard-secret",
-      },
-    });
+    );
     expect(service.getSnapshot()).toMatchObject({ configuration: saved, saving: false });
   });
 
@@ -160,7 +167,7 @@ describe("ConfigurationService", () => {
 
     expect(service.getSnapshot().error).toMatchObject({
       message: "Dashboard request to /api/config failed.",
-      cause,
+      cause: { kind: "network", cause },
     });
   });
 
@@ -185,11 +192,7 @@ describe("ConfigurationService", () => {
 });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body),
-  } as unknown as Response;
+  return new Response(JSON.stringify(body), { status });
 }
 
 function installLocalStorage(): void {

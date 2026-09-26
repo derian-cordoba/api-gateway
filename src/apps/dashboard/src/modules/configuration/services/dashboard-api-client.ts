@@ -1,4 +1,11 @@
 import { withErrorContext } from "@shared/errors/withErrorContext";
+import {
+  Headers,
+  HttpError,
+  HttpManager,
+  type HttpRequestOptions,
+} from "@shared/services/networking";
+import { isRecord } from "@shared/guards/isRecord";
 import type { ValidationIssue } from "../types/configuration.types";
 
 export class DashboardApiError extends Error {
@@ -6,13 +13,16 @@ export class DashboardApiError extends Error {
     message: string,
     readonly status: number,
     readonly issues: ValidationIssue[] = [],
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "DashboardApiError";
   }
 }
 
 export class DashboardApiClient {
+  constructor(private readonly http = new HttpManager()) { }
+
   getDashboardToken(): string {
     if (typeof window === "undefined") return "";
     return window.localStorage.getItem("gateway-dashboard-token") ?? "";
@@ -22,36 +32,14 @@ export class DashboardApiClient {
     window.localStorage.setItem("gateway-dashboard-token", token.trim());
   }
 
-  async request<T>(path: string, init: RequestInit = {}, jsonRequest = true): Promise<T> {
+  async request<T>(path: string, init: HttpRequestOptions<T> = {}, jsonRequest = true): Promise<T> {
     return withErrorContext(
       async () => {
-        const response = await fetch(path, {
-          ...init,
-          cache: "no-store",
-          headers: {
-            ...this.getHeaders(jsonRequest),
-            ...init.headers,
-          },
-        });
-        const payload = (await response.json()) as T & {
-          message?: string;
-          error?: string;
-          issues?: ValidationIssue[];
-        };
-        if (!response.ok) {
-          throw new DashboardApiError(
-            payload.message ?? payload.error ?? "Dashboard request failed.",
-            response.status,
-            payload.issues,
-          );
-        }
-        return payload;
+        const headers = Headers.merge(this.getHeaders(jsonRequest), init.headers);
+        return this.http.request<T>(path, { ...init, headers });
       },
       {
-        createException: (cause) =>
-          cause instanceof DashboardApiError
-            ? cause
-            : new Error(`Dashboard request to ${path} failed.`),
+        createException: (cause) => this.toApiError(cause, `Dashboard request to ${path} failed.`),
       },
     );
   }
@@ -59,15 +47,11 @@ export class DashboardApiClient {
   async downloadConfiguration(): Promise<void> {
     await withErrorContext(
       async () => {
-        const response = await fetch("/api/config/export", {
-          cache: "no-store",
+        const blob = await this.http.get<Blob>("/api/config/export", {
           headers: this.getHeaders(false),
+          responseType: "blob",
         });
-        if (!response.ok) {
-          throw new DashboardApiError("Could not export configuration.", response.status);
-        }
-
-        const url = URL.createObjectURL(await response.blob());
+        const url = URL.createObjectURL(blob);
         try {
           const link = document.createElement("a");
           link.href = url;
@@ -78,10 +62,32 @@ export class DashboardApiClient {
         }
       },
       {
-        createException: (cause) =>
-          cause instanceof DashboardApiError ? cause : new Error("Could not export configuration."),
+        createException: (cause) => this.toApiError(cause, "Could not export configuration."),
       },
     );
+  }
+
+  private toApiError(cause: unknown, fallback: string): Error {
+    if (cause instanceof DashboardApiError) {
+      return cause;
+    }
+
+    if (cause instanceof HttpError && cause.kind === "http" && cause.status !== undefined) {
+      const payload = cause.payload;
+      const issues =
+        isRecord(payload) && Array.isArray(payload.issues)
+          ? payload.issues.filter(
+            (issue): issue is ValidationIssue =>
+              isRecord(issue) &&
+              typeof issue.message === "string" &&
+              Array.isArray(issue.path) &&
+              issue.path.every((part) => typeof part === "string" || typeof part === "number"),
+          )
+          : [];
+      return new DashboardApiError(cause.message, cause.status, issues, { cause });
+    }
+
+    return new Error(fallback, { cause });
   }
 
   private getHeaders(jsonRequest: boolean): Record<string, string> {

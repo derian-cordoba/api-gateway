@@ -1,4 +1,5 @@
 import { StatusCodes as HttpStatus } from "http-status-codes";
+import { HttpError, HttpManager } from "@shared/services/networking";
 import { withErrorContext } from "@shared/errors/withErrorContext";
 import {
   DEFAULT_EVENT_LIMIT,
@@ -20,7 +21,17 @@ export class GatewayManagementError extends Error {
 }
 
 export class GatewayManagementClient {
-  constructor(private readonly config = getManagementConfig()) {}
+  private readonly http: HttpManager;
+
+  constructor(config = getManagementConfig(), http?: HttpManager) {
+    this.http =
+      http ??
+      new HttpManager({
+        baseURL: config.baseUrl.toString(),
+        headers: { Authorization: `Bearer ${config.token}` },
+        timeoutMs: 5_000,
+      });
+  }
 
   async overview(): Promise<GatewayOverview> {
     return this.get<GatewayOverview>("/v1/overview");
@@ -41,44 +52,20 @@ export class GatewayManagementClient {
     path: string,
     query?: Record<string, string | number>,
   ): Promise<T> {
-    const url = this.buildURL(path, query);
-
-    const response = await withErrorContext(
-      () =>
-        fetch(url, {
-          cache: "no-store",
-          headers: { Authorization: `Bearer ${this.config.token}` },
-          signal: AbortSignal.timeout(5_000),
-        }),
-      {
-        createException: (cause) =>
-          new GatewayManagementError(
-            "Could not reach the gateway management API.",
-            undefined,
-            { cause },
-          ),
+    return withErrorContext(() => this.http.get<T>(path, { query }), {
+      createException: (cause) => {
+        const error = cause instanceof HttpError ? cause : undefined;
+        return new GatewayManagementError(
+          error?.status === HttpStatus.UNAUTHORIZED
+            ? "The gateway management token was rejected."
+            : error?.kind === "http"
+              ? "The gateway management API returned an error."
+              : "Could not reach the gateway management API.",
+          error?.status,
+          { cause },
+        );
       },
-    );
-    if (!response.ok) {
-      throw new GatewayManagementError(
-        response.status === HttpStatus.UNAUTHORIZED
-          ? "The gateway management token was rejected."
-          : "The gateway management API returned an error.",
-        response.status,
-      );
-    }
-    return await response.json();
-  }
-
-  private buildURL(path: string, query?: Record<string, string | number>): URL {
-    const relativePath = path.replace(/^\/+/, "");
-    const url = new URL(relativePath, this.config.baseUrl);
-
-    for (const [key, value] of Object.entries(query ?? {})) {
-      url.searchParams.set(key, String(value));
-    }
-
-    return url;
+    });
   }
 }
 

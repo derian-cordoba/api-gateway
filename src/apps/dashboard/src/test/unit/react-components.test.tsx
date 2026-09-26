@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { HttpMethod } from "@shared/http/HttpMethod";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { JsonValueInput } from "@/modules/shared/components/JsonValueInput";
@@ -106,8 +107,8 @@ describe("dashboard React components", () => {
     const input = container.querySelector("textarea")!;
     fireEvent.change(input, { target: { value: "GET\n" } });
     expect(input).toHaveValue("GET\n");
-    expect(onChange).toHaveBeenLastCalledWith(["GET"]);
+    expect(onChange).toHaveBeenLastCalledWith([HttpMethod.GET]);
     fireEvent.change(input, { target: { value: "GET\nPOST" } });
-    expect(onChange).toHaveBeenLastCalledWith(["GET", "POST"]);
+    expect(onChange).toHaveBeenLastCalledWith([HttpMethod.GET, HttpMethod.POST]);
   });
 });

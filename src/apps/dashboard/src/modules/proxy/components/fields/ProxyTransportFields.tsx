@@ -1,5 +1,7 @@
 "use client";
 
+import { HttpMethod } from "@shared/http/HttpMethod";
+
 import {
   FormField,
   NumberInput,
@@ -26,7 +28,7 @@ export function ProxyTransportFields({
             }
           >
             <option value="">Preserve incoming method</option>
-            {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((method) => (
+            {Object.values(HttpMethod).map((method) => (
               <option key={method}>{method}</option>
             ))}
           </SelectInput>

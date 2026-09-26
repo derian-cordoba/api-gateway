@@ -1,3 +1,4 @@
+import { HttpMethod } from "@shared/http/HttpMethod";
 import { NextResponse } from "next/server";
 
 export async function GET(): Promise<NextResponse> {
@@ -17,7 +18,7 @@ export async function GET(): Promise<NextResponse> {
         { id: "headers", label: "Header transforms", required: false },
         { id: "cors", label: "CORS", required: false },
       ],
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+      methods: Object.values(HttpMethod),
       loadBalancingStrategies: ["round-robin", "weighted", "least-connections", "sticky"],
       authenticationStrategies: ["jwt", "apiKey", "basicAuth", "oauth2"],
       retryBackoffs: ["fixed", "exponential", "exponential-jitter"],

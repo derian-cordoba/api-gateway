@@ -1,3 +1,4 @@
+import { HttpMethod } from "@shared/http/HttpMethod";
 import type { GatewayRoute, StoredConfiguration } from "../types/configuration.types";
 import { toError } from "@shared/errors/toError";
 import { DashboardApiClient } from "./dashboard-api-client";
@@ -88,8 +89,8 @@ export class ConfigurationService {
     this.setConfigurationState({ saving: true, error: null });
     try {
       const saved = await this.client.request<StoredConfiguration>("/api/config", {
-        method: "PUT",
-        body: JSON.stringify({ routes, expectedRevision: current.revision }),
+        method: HttpMethod.PUT,
+        json: { routes, expectedRevision: current.revision },
       });
       this.setConfigurationState({ configuration: saved });
       return saved;
@@ -109,8 +110,8 @@ export class ConfigurationService {
     warnings: Array<{ path: Array<string | number>; message: string }>;
   }> =>
     this.client.request("/api/config/validate", {
-      method: "POST",
-      body: JSON.stringify(routes),
+      method: HttpMethod.POST,
+      json: routes,
     });
 
   readonly export = async (): Promise<void> => {
@@ -142,8 +143,8 @@ export class ConfigurationService {
     const current = this.configurationState.configuration;
     if (!current) return null;
     const restored = await this.client.request<StoredConfiguration>("/api/config/history", {
-      method: "POST",
-      body: JSON.stringify({ revision, expectedRevision: current.revision }),
+      method: HttpMethod.POST,
+      json: { revision, expectedRevision: current.revision },
     });
     this.setConfigurationState({ configuration: restored });
     return restored;
