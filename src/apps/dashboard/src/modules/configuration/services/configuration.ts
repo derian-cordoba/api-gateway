@@ -7,6 +7,8 @@ export { DashboardApiError } from "./dashboard-api-client";
 export type DashboardStatus = {
   status: string;
   storage?: string;
+  environment?: string;
+  configurationKey?: string;
   routeCount?: number;
   revision?: string;
   updatedAt?: string | null;
@@ -17,6 +19,7 @@ export type DashboardStatus = {
 export type ConfigurationHistoryEntry = { revision: string; updatedAt: string };
 
 export type ConfigurationState = {
+  sourceId: string;
   configuration: StoredConfiguration | null;
   loading: boolean;
   saving: boolean;
@@ -29,6 +32,7 @@ export type DashboardStatusState = {
 };
 
 const initialConfigurationState: ConfigurationState = {
+  sourceId: "default",
   configuration: null,
   loading: true,
   saving: false,
@@ -82,16 +86,51 @@ export class ConfigurationService {
 
   readonly refreshStatus = async (force = true): Promise<DashboardStatus> => this.loadStatus(force);
 
-  readonly save = async (routes: GatewayRoute[]): Promise<StoredConfiguration | null> => {
-    const current = this.configurationState.configuration;
-    if (!current) return null;
+  readonly selectSource = (sourceId: string): void => {
+    if (this.configurationState.saving) {
+      throw new Error("Wait for the current save to finish before switching sources.");
+    }
+
+    if (sourceId === this.configurationState.sourceId) {
+      return;
+    }
+
+    ++this.configurationRequestId;
+    ++this.statusRequestId;
+
+    this.configurationRequest = null;
+    this.statusRequest = null;
+    this.historyRequest = null;
+
+    this.setConfigurationState({ ...initialConfigurationState, sourceId });
+    this.setStatusState(initialStatusState);
+
+    void this.reload();
+    void this.refreshStatus();
+  };
+
+  readonly save = async (
+    routes: GatewayRoute[],
+    expected = this.configurationState.configuration,
+  ): Promise<StoredConfiguration | null> => {
+    if (!expected) {
+      return null;
+    }
+
+    const sourceId = this.configurationState.sourceId;
+    if ((expected.sourceId ?? "default") !== sourceId) {
+      throw new Error("The selected source changed. Reload before saving.");
+    }
 
     this.setConfigurationState({ saving: true, error: null });
     try {
-      const saved = await this.client.request<StoredConfiguration>("/api/config", {
-        method: HttpMethod.PUT,
-        json: { routes, expectedRevision: current.revision },
-      });
+      const saved = await this.client.request<StoredConfiguration>(
+        this.path("/api/config", sourceId),
+        {
+          method: HttpMethod.PUT,
+          json: { routes, expectedRevision: expected.revision },
+        },
+      );
       this.setConfigurationState({ configuration: saved });
       return saved;
     } catch (caught) {
@@ -116,7 +155,9 @@ export class ConfigurationService {
 
   readonly export = async (): Promise<void> => {
     try {
-      await this.client.downloadConfiguration();
+      await this.client.downloadConfiguration(
+        this.path("/api/config/export"),
+      );
     } catch (caught) {
       this.setConfigurationState({
         error: normalizeError(caught, "Could not export configuration."),
@@ -128,26 +169,37 @@ export class ConfigurationService {
     if (this.historyRequest) return this.historyRequest;
     this.historyRequest = (async () => {
       const payload = await this.client.request<{ entries: ConfigurationHistoryEntry[] }>(
-        "/api/config/history",
+        this.path("/api/config/history"),
       );
       return payload.entries;
     })();
+    const pending = this.historyRequest;
     try {
-      return await this.historyRequest;
+      return await pending;
     } finally {
-      this.historyRequest = null;
+      if (this.historyRequest === pending) {
+        this.historyRequest = null;
+      }
     }
   };
 
   readonly restore = async (revision: string): Promise<StoredConfiguration | null> => {
     const current = this.configurationState.configuration;
     if (!current) return null;
-    const restored = await this.client.request<StoredConfiguration>("/api/config/history", {
-      method: HttpMethod.POST,
-      json: { revision, expectedRevision: current.revision },
-    });
-    this.setConfigurationState({ configuration: restored });
-    return restored;
+    this.setConfigurationState({ saving: true, error: null });
+    try {
+      const restored = await this.client.request<StoredConfiguration>(
+        this.path("/api/config/history"),
+        {
+          method: HttpMethod.POST,
+          json: { revision, expectedRevision: current.revision },
+        },
+      );
+      this.setConfigurationState({ configuration: restored });
+      return restored;
+    } finally {
+      this.setConfigurationState({ saving: false });
+    }
   };
 
   readonly getDashboardToken = (): string => this.client.getDashboardToken();
@@ -162,7 +214,9 @@ export class ConfigurationService {
 
     this.setConfigurationState({ loading: true, error: null });
     const requestId = ++this.configurationRequestId;
-    this.configurationRequest = this.client.request<StoredConfiguration>("/api/config");
+    this.configurationRequest = this.client.request<StoredConfiguration>(
+      this.path("/api/config"),
+    );
 
     try {
       const configuration = await this.configurationRequest;
@@ -190,7 +244,11 @@ export class ConfigurationService {
 
     this.setStatusState({ loading: true });
     const requestId = ++this.statusRequestId;
-    this.statusRequest = this.client.request<DashboardStatus>("/api/status", {}, false);
+    this.statusRequest = this.client.request<DashboardStatus>(
+      this.path("/api/status"),
+      {},
+      false,
+    );
 
     try {
       const status = await this.statusRequest;
@@ -209,6 +267,12 @@ export class ConfigurationService {
         this.setStatusState({ loading: false });
       }
     }
+  }
+
+  private path(path: string, sourceId = this.configurationState.sourceId): string {
+    return sourceId === "default"
+      ? path
+      : `${path}?source=${encodeURIComponent(sourceId)}`;
   }
 
   private setConfigurationState(patch: Partial<ConfigurationState>): void {

@@ -92,7 +92,7 @@ export class Server {
    * and upgrade connections so the server closes promptly in tests.
    */
   async stop(): Promise<void> {
-    this.router.stop();
+    await this.router.stop();
 
     // Forcibly close any keep-alive or WebSocket connections so that
     // httpServer.close() resolves immediately instead of waiting for idle drain.

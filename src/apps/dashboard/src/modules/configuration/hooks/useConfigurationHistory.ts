@@ -11,6 +11,7 @@ function errorMessage(caught: unknown, fallback: string): string {
 export function useConfigurationHistory() {
   const {
     configuration,
+    sourceId,
     loading: configurationLoading,
     error: configurationError,
     reload: reloadConfiguration,
@@ -43,7 +44,7 @@ export function useConfigurationHistory() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [sourceId]);
 
   const refreshHistory = async () => {
     setHistoryLoading(true);

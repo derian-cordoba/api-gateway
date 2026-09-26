@@ -1,5 +1,7 @@
 "use client";
 
+import { SelectedRouteSource } from "@/modules/route-sources/components/SelectedRouteSource";
+
 import { useConfiguration } from "@/modules/configuration/hooks/useConfiguration";
 import type {
   GatewayRoute,
@@ -34,6 +36,7 @@ export function RouteDraftPage({
 
   return (
     <main className="editor-page">
+      <SelectedRouteSource />
       <RouteDraftHeader
         baseURL={route.baseURL}
         isNew={index === null}

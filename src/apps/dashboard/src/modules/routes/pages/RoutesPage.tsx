@@ -1,5 +1,7 @@
 "use client";
 
+import { SelectedRouteSource } from "@/modules/route-sources/components/SelectedRouteSource";
+
 import { useMemo, useState } from "react";
 import { useConfiguration } from "@/modules/configuration/hooks/useConfiguration";
 import type { GatewayRoute } from "@/modules/configuration/types/configuration.types";
@@ -51,6 +53,7 @@ export function RoutesPage() {
 
   return (
     <main className="page">
+      <SelectedRouteSource />
       <RoutesHeader onExport={() => void exportConfiguration()} onRefresh={() => void reload()} />
       {configuration && <RoutesStatusStrip configuration={configuration} saving={saving} />}
       {error && <RoutesErrorBanner error={error} onRetry={() => void reload()} />}

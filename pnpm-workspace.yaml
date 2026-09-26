@@ -2,3 +2,6 @@ packages:
   - "."
   - "src/apps/dashboard"
   - "src/apps/observatory"
+
+onlyBuiltDependencies:
+  - better-sqlite3

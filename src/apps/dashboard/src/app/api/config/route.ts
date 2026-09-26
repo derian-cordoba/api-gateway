@@ -1,3 +1,4 @@
+import { storageErrorResponse } from "@/server/errors/storage-error-response";
 import { NextRequest, NextResponse } from "next/server";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import { ConfigurationService } from "@/server/configuration/ConfigurationService";
@@ -11,9 +12,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!isDashboardRequestAuthorized(request)) return unauthorizedResponse();
 
   try {
-    const config = await new ConfigurationService().read();
+    const config = await new ConfigurationService(
+      undefined,
+      request.nextUrl.searchParams.get("source") ?? "default",
+    ).read();
     return NextResponse.json(config, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const storageResponse = storageErrorResponse(error);
+
+    if (storageResponse) {
+      return storageResponse;
+    }
+
     return NextResponse.json(
       { error: "Configuration read failed", message: toMessage(error) },
       { status: HttpStatus.INTERNAL_SERVER_ERROR, headers: { "Cache-Control": "no-store" } },
@@ -26,7 +36,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   try {
     const body = (await request.json()) as { routes?: unknown; expectedRevision?: unknown };
-    const service = new ConfigurationService();
+    const service = new ConfigurationService(
+      undefined,
+      request.nextUrl.searchParams.get("source") ?? "default",
+    );
     const validation = service.validate(body.routes);
 
     if (!validation.success) {
@@ -41,6 +54,12 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     const saved = await service.write(validation.routes, expectedRevision);
     return NextResponse.json(saved, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const storageResponse = storageErrorResponse(error);
+
+    if (storageResponse) {
+      return storageResponse;
+    }
+
     if (error instanceof ConfigurationConflictError) {
       return NextResponse.json(
         {

@@ -137,6 +137,36 @@ describe("ConfigurationService", () => {
     expect(service.getSnapshot()).toMatchObject({ configuration: saved, saving: false });
   });
 
+  it("ignores a previous source response and pins saves to the selected source", async () => {
+    let resolveOld!: (response: Response) => void;
+    const candidate = { ...configuration, sourceId: "candidate", revision: "candidate-revision" };
+    fetchMock.mockImplementation(async (url) => {
+      if (url === "/api/config")
+        return new Promise<Response>((resolve) => {
+          resolveOld = resolve;
+        });
+      if (String(url).startsWith("/api/status")) return jsonResponse({ status: "ready" });
+      return jsonResponse(candidate);
+    });
+    const service = new ConfigurationService();
+    const oldRequest = service.reload();
+    await vi.waitFor(() => expect(resolveOld).toBeDefined());
+    service.selectSource("candidate");
+    await vi.waitFor(() => expect(service.getSnapshot().configuration).toEqual(candidate));
+    resolveOld(jsonResponse(configuration));
+    await oldRequest;
+    expect(service.getSnapshot().configuration).toEqual(candidate);
+    await expect(service.save([], configuration)).rejects.toThrow("selected source changed");
+    await service.save([], candidate);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/config?source=candidate",
+      expect.objectContaining({
+        method: HttpMethod.PUT,
+        body: JSON.stringify({ routes: [], expectedRevision: "candidate-revision" }),
+      }),
+    );
+  });
+
   it("stores structured API errors in configuration state", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(

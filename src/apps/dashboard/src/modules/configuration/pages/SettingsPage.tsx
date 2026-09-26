@@ -1,5 +1,7 @@
 "use client";
 
+import { RouteSourcesCard } from "@/modules/route-sources/components/RouteSourcesCard";
+import { useConfiguration } from "../hooks/useConfiguration";
 import { useState } from "react";
 import { ConfigurationHistoryCard } from "../components/ConfigurationHistoryCard";
 import { ConfigurationStatusCard } from "../components/ConfigurationStatusCard";
@@ -8,6 +10,7 @@ import { useDashboardStatus } from "../hooks/useDashboardStatus";
 import { configurationService } from "../services/configuration";
 
 export function SettingsPage() {
+  const { sourceId } = useConfiguration();
   const { status, loading, refresh } = useDashboardStatus();
   const [tokenVersion, setTokenVersion] = useState(0);
   return (
@@ -16,7 +19,7 @@ export function SettingsPage() {
         <div>
           <span className="eyebrow">Dashboard</span>
           <h1>Settings</h1>
-          <p>Connection and local configuration storage.</p>
+          <p>Connection, route sources, and configuration history.</p>
         </div>
       </header>
       <DashboardTokenCard
@@ -26,8 +29,9 @@ export function SettingsPage() {
           setTokenVersion((version) => version + 1);
         }}
       />
+      <RouteSourcesCard key={`sources-${tokenVersion}`} />
       <ConfigurationStatusCard status={status} loading={loading} onRefresh={() => void refresh()} />
-      <ConfigurationHistoryCard key={tokenVersion} />
+      <ConfigurationHistoryCard key={`${tokenVersion}:${sourceId}`} />
     </main>
   );
 }

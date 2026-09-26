@@ -1,3 +1,4 @@
+import type { RouteSourceSummary } from "../../../../../../modules/route-sources/types";
 import type { z } from "zod";
 import type { GatewaySchema } from "@gateway/routes/validators/gateway.schema";
 
@@ -11,10 +12,12 @@ export type HeaderTransform = NonNullable<NonNullable<GatewayRoute["headers"]>["
 export type ConfigurationWarning = { path: Array<string | number>; message: string };
 
 export type StoredConfiguration = {
+  sourceId?: string;
+  source?: RouteSourceSummary;
   routes: GatewayRoute[];
   revision: string;
   updatedAt: string | null;
-  filePath: string;
+  filePath?: string;
   warnings: ConfigurationWarning[];
 };
 

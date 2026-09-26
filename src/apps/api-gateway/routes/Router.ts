@@ -1,3 +1,4 @@
+import { ManagedRouteReloader } from "./ManagedRouteReloader";
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { Gateway } from "../types/gateway";
@@ -29,7 +30,7 @@ import { createManagementRouter } from "./ManagementRouter";
 
 export class Router {
   private readonly router: ExpressRouter;
-  private reloader: RouteReloader | null = null;
+  private reloader: RouteReloader | ManagedRouteReloader | null = null;
   private readonly healthState: HealthState = { ready: false };
 
   constructor(
@@ -86,13 +87,33 @@ export class Router {
     // Prometheus metrics endpoint
     this.router.use(createMetricsRouter(metricsCollector));
 
+    // Hot-reloadable proxy routes
+    const useManagedSources =
+      !!(process.env.ROUTE_SOURCE_PROFILES || process.env.ROUTE_CONTROL_SQLITE_PATH || process.env.ROUTE_CONTROL_POSTGRES_URL)
+      && !this.runtimeOptions.routeSource
+      && !this.runtimeOptions.routeStorageManager;
+
+    const Reloader = useManagedSources ? ManagedRouteReloader : RouteReloader;
+    this.reloader = new Reloader(
+      httpServer,
+      onRouteReloaded,
+      this.runtimeOptions,
+      this.eventBus, (state) => this.operationState?.setConfigurationSync(state),
+    );
+
+    await this.reloader.start();
+
     if (appEnv.management.enabled && this.operationState) {
-      this.router.use(appEnv.management.prefix, createManagementRouter(this.operationState, metricsCollector));
+      this.router.use(
+        appEnv.management.prefix,
+        createManagementRouter(
+          this.operationState,
+          metricsCollector,
+          appEnv.management,
+          this.reloader instanceof ManagedRouteReloader ? this.reloader : undefined),
+      );
     }
 
-    // Hot-reloadable proxy routes
-    this.reloader = new RouteReloader(httpServer, onRouteReloaded, this.runtimeOptions, this.eventBus);
-    await this.reloader.start();
     this.healthState.ready = true;
     this.operationState?.setReady(true);
     this.router.use(this.reloader.getDelegatorMiddleware());
@@ -104,8 +125,8 @@ export class Router {
   /**
    * Stop the file watcher and remove the SIGHUP reload listener.
    */
-  stop(): void {
-    this.reloader?.stop();
+  async stop(): Promise<void> {
+    await this.reloader?.stop();
   }
 
   private configureCors(): void {

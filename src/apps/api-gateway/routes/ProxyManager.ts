@@ -92,7 +92,7 @@ export class ProxyManager {
     ];
 
     const sources = new CompositeRouteSource([
-      new FileRouteSource(appEnv.routes.filePath),
+      runtimeOptions.routeSource ?? new FileRouteSource(appEnv.routes.filePath),
       new EnvRouteSource(),
     ]);
 

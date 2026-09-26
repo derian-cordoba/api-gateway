@@ -1,3 +1,4 @@
+import { storageErrorResponse } from "@/server/errors/storage-error-response";
 import { NextRequest, NextResponse } from "next/server";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import { ConfigurationService } from "@/server/configuration/ConfigurationService";
@@ -11,10 +12,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!isDashboardRequestAuthorized(request)) return unauthorizedResponse();
   try {
     return NextResponse.json(
-      { entries: await new ConfigurationService().listHistory() },
+      {
+        entries: await new ConfigurationService(
+          undefined,
+          request.nextUrl.searchParams.get("source") ?? "default",
+        ).listHistory(),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
+    const storageResponse = storageErrorResponse(error);
+
+    if (storageResponse) {
+      return storageResponse;
+    }
+
     return NextResponse.json(
       { error: "Configuration history failed", message: toMessage(error) },
       { status: HttpStatus.INTERNAL_SERVER_ERROR },
@@ -26,14 +38,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!isDashboardRequestAuthorized(request)) return unauthorizedResponse();
   try {
     const body = (await request.json()) as { revision?: unknown; expectedRevision?: unknown };
-    if (typeof body.revision !== "string" || !/^[a-f0-9]{16}$/.test(body.revision)) {
+    if (
+      typeof body.revision !== "string" ||
+      !/^(?:[a-f0-9]{16}|[a-f0-9]{32})$/.test(body.revision)
+    ) {
       return NextResponse.json({ error: "Invalid revision" }, { status: HttpStatus.BAD_REQUEST });
     }
     const expectedRevision =
       typeof body.expectedRevision === "string" ? body.expectedRevision : undefined;
-    const restored = await new ConfigurationService().restore(body.revision, expectedRevision);
+    const restored = await new ConfigurationService(
+      undefined,
+      request.nextUrl.searchParams.get("source") ?? "default",
+    ).restore(body.revision, expectedRevision);
     return NextResponse.json(restored, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    const storageResponse = storageErrorResponse(error);
+
+    if (storageResponse) {
+      return storageResponse;
+    }
+
     if (error instanceof ConfigurationConflictError) {
       return NextResponse.json(
         { error: "Revision conflict", message: error.message },

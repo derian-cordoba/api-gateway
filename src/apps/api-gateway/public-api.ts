@@ -125,3 +125,8 @@ export type {
   StripeWebhookConfig,
   CustomWebhookConfig,
 } from "./types/webhook";
+
+export { RouteStorageManager } from "../../modules/route-configuration/infrastructure/RouteStorageManager";
+export { StorageDriver, DatabaseEnvironment, readStorageConfig } from "../../modules/route-configuration/infrastructure/config/storage-config";
+export type { StorageConfig } from "../../modules/route-configuration/infrastructure/config/storage-config";
+export type { RouteConfigurationRepository, RouteRevision, StorageStatus } from "../../modules/route-configuration/domain/types";

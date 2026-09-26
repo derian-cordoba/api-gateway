@@ -1,6 +1,7 @@
 import type { Gateway } from "../types/gateway";
 import type { MetricsCollector } from "../middleware/metrics/MetricsCollector";
 import type { GatewayEvents } from "../middleware/GatewayEvents";
+import { StatusCodes } from "http-status-codes";
 
 const MAX_EVENTS = 1_000;
 const MAX_EVENT_AGE_MS = 24 * 60 * 60 * 1_000;
@@ -25,15 +26,26 @@ export type GatewayRouteOverview = {
   circuitState: string | null;
 };
 
+export type ConfigurationSyncState = {
+  status: "synchronized" | "degraded";
+  revision: string | null;
+  message?: string;
+};
+
 export class GatewayOperationState {
-  private readonly startedAt = Date.now();
-  private ready = false;
-  private routes: readonly Gateway[] = [];
-  private lastRouteReloadedAt: string | null = null;
+  private readonly startedAt: number = Date.now();
   private readonly circuitStates = new Map<string, string>();
   private readonly rateLimitRejections = new Map<string, number>();
+  private configurationSync?: ConfigurationSyncState;
+  private ready: boolean = false;
+  private routes: readonly Gateway[] = [];
+  private lastRouteReloadedAt: string | null = null;
   private events: GatewayOperationEvent[] = [];
-  private nextEventId = 1;
+  private nextEventId: number = 1;
+
+  setConfigurationSync(state: ConfigurationSyncState): void {
+    this.configurationSync = state;
+  }
 
   setReady(ready: boolean): void {
     this.ready = ready;
@@ -43,9 +55,13 @@ export class GatewayOperationState {
     this.routes = routes;
     this.lastRouteReloadedAt = new Date().toISOString();
     const activeRoutes = new Set(routes.map((route) => route.baseURL));
+
     for (const route of this.circuitStates.keys()) {
-      if (!activeRoutes.has(route.split(":")[0])) this.circuitStates.delete(route);
+      if (!activeRoutes.has(route.split(":")[0])) {
+        this.circuitStates.delete(route);
+      }
     }
+
     this.addEvent({
       type: "route-reloaded",
       message: `Loaded ${routes.length} route${routes.length === 1 ? "" : "s"}.`,
@@ -75,6 +91,7 @@ export class GatewayOperationState {
 
   async getOverview(metrics: MetricsCollector): Promise<{
     apiVersion: 1;
+    configurationSync?: ConfigurationSyncState;
     timestamp: string;
     ready: boolean;
     uptimeSeconds: number;
@@ -92,7 +109,10 @@ export class GatewayOperationState {
     const byRoute = new Map<string, GatewayRouteOverview>();
     const ensure = (baseURL: string): GatewayRouteOverview => {
       const existing = byRoute.get(baseURL);
-      if (existing) return existing;
+      if (existing) {
+        return existing;
+      }
+
       const overview: GatewayRouteOverview = {
         baseURL,
         requestsTotal: 0,
@@ -104,68 +124,111 @@ export class GatewayOperationState {
         rateLimitRejectionsTotal: this.rateLimitRejections.get(baseURL) ?? 0,
         circuitState: this.getCircuitState(baseURL),
       };
+
       byRoute.set(baseURL, overview);
+
       return overview;
     };
 
-    for (const route of this.routes) ensure(route.baseURL);
+    for (const route of this.routes) {
+      ensure(route.baseURL);
+    }
+
     for (const value of requests.values) {
       const route = String(value.labels.route ?? "");
-      if (!route) continue;
+      if (!route) {
+        continue;
+      }
+
       const overview = ensure(route);
       const status = Number(value.labels.status_code ?? 0);
       overview.requestsTotal += value.value;
-      if (status >= 400 && status < 500) overview.clientErrorsTotal += value.value;
-      if (status >= 500) overview.serverErrorsTotal += value.value;
+
+      if (status >= StatusCodes.BAD_REQUEST && status < StatusCodes.INTERNAL_SERVER_ERROR) {
+        overview.clientErrorsTotal += value.value;
+      }
+
+      if (status >= StatusCodes.INTERNAL_SERVER_ERROR) {
+        overview.serverErrorsTotal += value.value;
+      }
     }
 
     const durationCounts = new Map<string, number>();
     const durationSums = new Map<string, number>();
     for (const value of durations.values) {
       const route = String(value.labels.route ?? "");
-      if (!route) continue;
+      if (!route) {
+        continue;
+      }
+
       if (value.metricName?.endsWith("_count")) {
         durationCounts.set(route, (durationCounts.get(route) ?? 0) + value.value);
       }
+
       if (value.metricName?.endsWith("_sum")) {
         durationSums.set(route, (durationSums.get(route) ?? 0) + value.value);
       }
     }
+
     for (const [route, count] of durationCounts) {
-      if (count > 0) ensure(route).averageLatencyMs = ((durationSums.get(route) ?? 0) / count) * 1_000;
+      if (count > 0) {
+        ensure(route).averageLatencyMs = ((durationSums.get(route) ?? 0) / count) * 1_000;
+      }
     }
+
     for (const value of cacheHits.values) {
       const route = String(value.labels.route ?? "");
-      if (route) ensure(route).cacheHitsTotal += value.value;
+      if (route) {
+        ensure(route).cacheHitsTotal += value.value;
+      }
     }
+
     for (const value of cacheStaleHits.values) {
       const route = String(value.labels.route ?? "");
-      if (route) ensure(route).cacheStaleHitsTotal += value.value;
+      if (route) {
+        ensure(route).cacheStaleHitsTotal += value.value;
+      }
     }
 
     return {
       apiVersion: 1,
+      configurationSync: this.configurationSync,
       timestamp: new Date().toISOString(),
       ready: this.ready,
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1_000),
       version: process.env.npm_package_version || "unknown",
       routeCount: this.routes.length,
       lastRouteReloadedAt: this.lastRouteReloadedAt,
-      routes: [...byRoute.values()].sort((left, right) => left.baseURL.localeCompare(right.baseURL)),
+      routes: [...byRoute.values()]
+        .sort((left, right) => left.baseURL.localeCompare(right.baseURL)),
     };
   }
 
   getEvents(cursor?: string, limit = 50, route?: string): { events: GatewayOperationEvent[]; nextCursor: string | null } {
     this.pruneEvents();
-    const candidates = route ? this.events.filter((event) => event.route === route) : this.events;
-    const offset = cursor ? candidates.findIndex((event) => event.id === cursor) + 1 : 0;
+    const candidates = route
+      ? this.events.filter((event) => event.route === route)
+      : this.events;
+    const offset = cursor
+      ? candidates.findIndex((event) => event.id === cursor) + 1
+      : 0;
     const start = Math.max(0, offset);
     const events = candidates.slice(start, start + limit);
-    return { events, nextCursor: events.length === limit ? events.at(-1)?.id ?? null : null };
+
+    return {
+      events,
+      nextCursor: events.length === limit
+        ? events.at(-1)?.id ?? null
+        : null,
+    };
   }
 
   private addEvent(event: Omit<GatewayOperationEvent, "id" | "timestamp">): void {
-    this.events.unshift({ id: String(this.nextEventId++), timestamp: new Date().toISOString(), ...event });
+    this.events.unshift({
+      id: String(this.nextEventId++),
+      timestamp: new Date().toISOString(),
+      ...event,
+    });
     this.pruneEvents();
   }
 
@@ -176,8 +239,15 @@ export class GatewayOperationState {
         .filter(([key]) => key.startsWith(`${baseURL}:`))
         .map(([, state]) => state),
     ].filter((state): state is string => state !== undefined);
-    if (states.includes("OPEN")) return "OPEN";
-    if (states.includes("HALF_OPEN")) return "HALF_OPEN";
+
+    if (states.includes("OPEN")) {
+      return "OPEN";
+    }
+
+    if (states.includes("HALF_OPEN")) {
+      return "HALF_OPEN";
+    }
+
     return states.at(0) ?? null;
   }
 

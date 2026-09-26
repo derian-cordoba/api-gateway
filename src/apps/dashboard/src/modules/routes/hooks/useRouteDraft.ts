@@ -1,5 +1,6 @@
 "use client";
 
+import { useUnsavedRouteChanges } from "./useUnsavedRouteChanges";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -21,6 +22,9 @@ export function useRouteDraft({
 }) {
   const router = useRouter();
   const [route, setRoute] = useState(initialRoute);
+
+  useUnsavedRouteChanges(JSON.stringify(route) !== JSON.stringify(initialRoute));
+
   const [saveError, setSaveError] = useState<Error | null>(null);
   const enabledSections = new Set(
     [

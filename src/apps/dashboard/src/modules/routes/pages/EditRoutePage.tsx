@@ -53,7 +53,7 @@ export function EditRoutePage() {
 
   return (
     <RouteDraftPage
-      key={`${configuration.revision}:${indexParam ?? "new"}`}
+      key={`${configuration.sourceId ?? "default"}:${configuration.revision}:${indexParam ?? "new"}`}
       configuration={configuration}
       index={index}
       initialRoute={source ? structuredClone(source) : createEmptyRoute()}

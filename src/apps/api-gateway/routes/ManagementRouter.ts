@@ -1,3 +1,5 @@
+import type { ManagedRouteReloader } from "./ManagedRouteReloader";
+import { createRouteSourceManagementRouter } from "./RouteSourceManagementRouter";
 import { Router as ExpressRouter, type Request, type Response } from "express";
 import { StatusCodes as HttpStatus } from "http-status-codes";
 import { appEnv } from "../config/app-env";
@@ -10,12 +12,22 @@ export function createManagementRouter(
   state: GatewayOperationState,
   metrics: MetricsCollector,
   config: ManagementConfig = appEnv.management,
+  sourceRuntime?: ManagedRouteReloader,
 ): ExpressRouter {
   const router = ExpressRouter();
   router.use(authorizeManagementRequest(config));
+
+  if (sourceRuntime) {
+    router.use("/v1/route-sources", createRouteSourceManagementRouter(sourceRuntime));
+  }
+
   router.get("/v1/capabilities", (_req, res) => {
-    res.set("Cache-Control", "no-store").json({ apiVersion: 1, features: ["overview", "events"] });
+    res.set("Cache-Control", "no-store").json({
+      apiVersion: 1,
+      features: ["overview", "events", ...(sourceRuntime ? ["route-sources"] : [])]
+    });
   });
+
   router.get("/v1/overview", async (_req, res, next) => {
     try {
       res.set("Cache-Control", "no-store").json(await state.getOverview(metrics));
@@ -23,6 +35,7 @@ export function createManagementRouter(
       next(error);
     }
   });
+
   router.get("/v1/events", (req, res) => {
     const limit = parseLimit(req, res);
     if (limit === null) {
@@ -60,15 +73,20 @@ function authorizeManagementRequest(config: ManagementConfig) {
 
 function parseLimit(req: Request, res: Response): number | null {
   const raw = req.query.limit;
-  if (raw === undefined) return 50;
+  if (raw === undefined) {
+    return 50;
+  }
+
   if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
     res.status(HttpStatus.BAD_REQUEST).json({ error: "Invalid limit" });
     return null;
   }
+
   const limit = Number(raw);
   if (limit < 1 || limit > 100) {
     res.status(HttpStatus.BAD_REQUEST).json({ error: "Limit must be between 1 and 100" });
     return null;
   }
+
   return limit;
 }

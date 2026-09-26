@@ -19,3 +19,8 @@ src/apps/dashboard/.env.local
 src/apps/observatory/.next
 src/apps/observatory/out
 src/apps/observatory/.env.local
+
+# Local route databases (may contain upstream credentials)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

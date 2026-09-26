@@ -1675,6 +1675,8 @@ kill -HUP $(lsof -ti tcp:3000)
 
 ## Running the Gateway
 
+Route configuration can be stored in SQLite, PostgreSQL, or MongoDB. See the [database storage guide](docs/database-route-storage.md) for setup, migration from JSON, environment selection, and rollback.
+
 Dashboard and Observatory share an injectable HTTP manager. See the [networking guide](src/shared/services/networking/README.md) for live and mock transports, request options, cancellation, and error handling.
 
 ### Development (hot-reload)
@@ -2283,3 +2285,5 @@ kill -HUP $(pgrep -f "api-gateway")
 ```
 
 In Kubernetes, use `kubectl exec` to send the signal, or update the `ROUTES` env var and trigger a rolling restart.
+
+See [Dashboard route sources](docs/dashboard-route-sources.md) for named storage profiles, source-specific editing, and coordinated gateway activation.

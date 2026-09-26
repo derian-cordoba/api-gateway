@@ -13,7 +13,8 @@ export function useConfiguration() {
   return {
     ...state,
     reload: configurationService.reload,
-    save: configurationService.save,
+    save: (routes: Parameters<typeof configurationService.save>[0]) =>
+      configurationService.save(routes, state.configuration),
     exportConfiguration: configurationService.export,
   };
 }

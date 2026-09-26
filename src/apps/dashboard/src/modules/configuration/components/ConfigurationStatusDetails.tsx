@@ -16,6 +16,12 @@ export function ConfigurationStatusDetails({ status }: { status: DashboardStatus
         <dt>Driver</dt>
         <dd>{status.storage ?? "Unavailable"}</dd>
       </div>
+      {status.environment && (
+        <div>
+          <dt>Environment</dt>
+          <dd>{status.environment}</dd>
+        </div>
+      )}
       <div>
         <dt>Route count</dt>
         <dd>{status.routeCount ?? "—"}</dd>
@@ -27,8 +33,10 @@ export function ConfigurationStatusDetails({ status }: { status: DashboardStatus
         </dd>
       </div>
       <div>
-        <dt>File</dt>
-        <dd className="path-value">{status.filePath ?? status.message ?? "—"}</dd>
+        <dt>Configuration</dt>
+        <dd className="path-value">
+          {status.filePath ?? status.configurationKey ?? status.message ?? "—"}
+        </dd>
       </div>
     </dl>
   );

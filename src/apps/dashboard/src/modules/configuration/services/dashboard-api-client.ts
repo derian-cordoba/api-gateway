@@ -21,7 +21,7 @@ export class DashboardApiError extends Error {
 }
 
 export class DashboardApiClient {
-  constructor(private readonly http = new HttpManager()) { }
+  constructor(private readonly http = new HttpManager()) {}
 
   getDashboardToken(): string {
     if (typeof window === "undefined") return "";
@@ -44,10 +44,10 @@ export class DashboardApiClient {
     );
   }
 
-  async downloadConfiguration(): Promise<void> {
+  async downloadConfiguration(path = "/api/config/export"): Promise<void> {
     await withErrorContext(
       async () => {
-        const blob = await this.http.get<Blob>("/api/config/export", {
+        const blob = await this.http.get<Blob>(path, {
           headers: this.getHeaders(false),
           responseType: "blob",
         });
@@ -77,12 +77,12 @@ export class DashboardApiClient {
       const issues =
         isRecord(payload) && Array.isArray(payload.issues)
           ? payload.issues.filter(
-            (issue): issue is ValidationIssue =>
-              isRecord(issue) &&
-              typeof issue.message === "string" &&
-              Array.isArray(issue.path) &&
-              issue.path.every((part) => typeof part === "string" || typeof part === "number"),
-          )
+              (issue): issue is ValidationIssue =>
+                isRecord(issue) &&
+                typeof issue.message === "string" &&
+                Array.isArray(issue.path) &&
+                issue.path.every((part) => typeof part === "string" || typeof part === "number"),
+            )
           : [];
       return new DashboardApiError(cause.message, cause.status, issues, { cause });
     }
